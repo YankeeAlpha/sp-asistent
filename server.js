@@ -178,6 +178,14 @@ function parseJsonBody(req) {
   });
 }
 
+// Pomocník pre overenie práv administrátora
+function isAdminRequest(req, parsedUrl) {
+  const pin = req.headers['x-admin-pin'] || (parsedUrl && parsedUrl.query && parsedUrl.query.admin_pin);
+  if (!pin) return false;
+  const admin = db.prepare("SELECT * FROM employees WHERE role = 'admin' AND pin = ?").get(String(pin));
+  return !!admin;
+}
+
 // Odpoveď JSON
 function sendJson(res, statusCode, data) {
   res.writeHead(statusCode, {
@@ -243,19 +251,34 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  // 2. Zoznam zamestnancov
+  // 2. Zoznam zamestnancov (BEZPEČNÉ: heslá/PINy vidí IBA administrátor!)
   if (pathname === '/api/employees' && method === 'GET') {
     try {
+      const isAdmin = isAdminRequest(req, parsedUrl);
       const employees = db.prepare("SELECT id, name, role, pin, annual_leave_days, color, is_active FROM employees WHERE is_active = 1 ORDER BY role DESC, name ASC").all();
-      return sendJson(res, 200, employees);
+
+      // Ak požiadavka nie je od overeného administrátora, heslo/PIN sa NIKDY neodošle!
+      const safeEmployees = employees.map(emp => {
+        if (!isAdmin) {
+          const { pin, ...safeData } = emp;
+          return safeData;
+        }
+        return emp;
+      });
+
+      return sendJson(res, 200, safeEmployees);
     } catch (e) {
       return sendJson(res, 500, { error: e.message });
     }
   }
 
-  // 3. Pridanie zamestnanca (iba manažér)
+  // 3. Pridanie zamestnanca (iba manažér / administrátor)
   if (pathname === '/api/employees' && method === 'POST') {
     try {
+      if (!isAdminRequest(req, parsedUrl)) {
+        return sendJson(res, 403, { error: 'Iba administrátor môže pridávať zamestnancov.' });
+      }
+
       const data = await parseJsonBody(req);
       if (!data.name || !data.name.trim()) {
         return sendJson(res, 400, { error: 'Meno zamestnanca je povinné.' });
@@ -286,9 +309,13 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  // 4. Úprava zamestnanca
+  // 4. Úprava zamestnanca (iba administrátor)
   if (pathname.startsWith('/api/employees/') && method === 'PUT') {
     try {
+      if (!isAdminRequest(req, parsedUrl)) {
+        return sendJson(res, 403, { error: 'Iba administrátor môže upravovať zamestnancov.' });
+      }
+
       const id = Number(pathname.split('/')[3]);
       const data = await parseJsonBody(req);
       
@@ -308,13 +335,26 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  // 5. Deaktivácia / zmazanie zamestnanca
+  // 5. Odobratie / zmazanie zamestnanca (iba administrátor)
   if (pathname.startsWith('/api/employees/') && method === 'DELETE') {
     try {
+      if (!isAdminRequest(req, parsedUrl)) {
+        return sendJson(res, 403, { error: 'Iba administrátor môže odoberať zamestnancov.' });
+      }
+
       const id = Number(pathname.split('/')[3]);
-      // Soft-delete
-      db.prepare("UPDATE employees SET is_active = 0 WHERE id = ?").run(id);
-      return sendJson(res, 200, { success: true });
+      const isPermanent = parsedUrl.query.permanent === 'true';
+
+      if (isPermanent) {
+        // Trvalé vymazanie zamestnanca a jeho absencií
+        db.prepare("DELETE FROM absences WHERE employee_id = ?").run(id);
+        db.prepare("DELETE FROM employees WHERE id = ?").run(id);
+      } else {
+        // Bezpečná deaktivácia (história dochádzky zostane zachovaná)
+        db.prepare("UPDATE employees SET is_active = 0 WHERE id = ?").run(id);
+      }
+
+      return sendJson(res, 200, { success: true, permanent: isPermanent });
     } catch (e) {
       return sendJson(res, 500, { error: e.message });
     }
@@ -563,6 +603,69 @@ const server = http.createServer(async (req, res) => {
       const filename = month 
         ? `absencie_${year}_${String(month).padStart(2, '0')}.csv` 
         : `absencie_${year}.csv`;
+
+      res.writeHead(200, {
+        'Content-Type': 'text/csv; charset=utf-8',
+        'Content-Disposition': `attachment; filename="${filename}"`
+      });
+      return res.end(csv);
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  // 13. Zmena PINu / hesla (pre zamestnanca aj manažéra)
+  if (pathname === '/api/change-pin' && method === 'POST') {
+    try {
+      const { employeeId, oldPin, newPin, isAdminChange } = await parseJsonBody(req);
+      if (!employeeId || !newPin || !newPin.trim()) {
+        return sendJson(res, 400, { error: 'Vyplňte nové heslo / PIN.' });
+      }
+
+      const emp = db.prepare("SELECT * FROM employees WHERE id = ? AND is_active = 1").get(Number(employeeId));
+      if (!emp) {
+        return sendJson(res, 404, { error: 'Používateľ nebol nájdený.' });
+      }
+
+      // Ak to nie je manažérska priama zmena, vyžadujeme overenie starého PINu
+      if (!isAdminChange) {
+        if (!oldPin || emp.pin !== oldPin.trim()) {
+          return sendJson(res, 400, { error: 'Pôvodné heslo / PIN nie je správne.' });
+        }
+      }
+
+      db.prepare("UPDATE employees SET pin = ? WHERE id = ?").run(newPin.trim(), Number(employeeId));
+      return sendJson(res, 200, { success: true, message: 'Heslo bolo úspešne zmenené.' });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  // 14. Export všetkých hesiel / PINov do Excel tabuľky (CSV) - LEN PRE ADMINISTRÁTORA
+  if (pathname === '/api/export-passwords' && method === 'GET') {
+    try {
+      if (!isAdminRequest(req, parsedUrl)) {
+        res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
+        return res.end('Prístup zamietnutý. Zoznam hesiel môže stiahnuť iba overený administrátor.');
+      }
+
+      const rows = db.prepare(`
+        SELECT name, role, pin, annual_leave_days 
+        FROM employees 
+        WHERE is_active = 1 
+        ORDER BY role DESC, name ASC
+      `).all();
+
+      let csv = '\uFEFF'; // UTF-8 BOM pre Excel
+      csv += 'Meno a priezvisko;Rola v systéme;Prihlasovacie heslo / PIN;Ročný nárok na dovolenku (dní);Stav účtu\r\n';
+
+      rows.forEach(r => {
+        const rola = r.role === 'admin' ? 'Správca / Manažér' : 'Zamestnanec';
+        csv += `"${r.name}";"${rola}";"${r.pin}";"${r.annual_leave_days}";"Aktívny"\r\n`;
+      });
+
+      const today = new Date().toISOString().split('T')[0];
+      const filename = `zoznam_hesiel_zamestnancov_${today}.csv`;
 
       res.writeHead(200, {
         'Content-Type': 'text/csv; charset=utf-8',

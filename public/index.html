@@ -46,6 +46,9 @@
       </button>
       <div id="userInfoContainer" class="user-info-dropdown">
         <span id="userNameDisplay" class="user-name">Neprihlásený</span>
+        <button id="changePinHeaderBtn" class="btn btn-sm btn-outline" onclick="openChangePinModal()" title="Zmeniť moje heslo alebo PIN" style="display: none;">
+          🔑 Zmeniť PIN
+        </button>
         <button id="logoutBtn" class="btn btn-sm btn-ghost" title="Zmeniť používateľa / Odhlásiť">
           🚪 Odhlásiť
         </button>
@@ -130,9 +133,14 @@
           <h2>Ahoj, <span id="empGreetingName">Kolega</span>! 👋</h2>
           <p class="text-muted">Tu môžete jednoducho zadať dovolenku, PN, OČR alebo lekára.</p>
         </div>
-        <button class="btn btn-primary btn-lg pulse-btn" onclick="openAbsenceModal()">
-          ➕ Zadať neprítomnosť
-        </button>
+        <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+          <button class="btn btn-outline btn-sm" onclick="openChangePinModal()" style="background:rgba(255,255,255,0.15);color:#fff;border-color:rgba(255,255,255,0.3)">
+            🔑 Zmeniť môj PIN
+          </button>
+          <button class="btn btn-primary btn-lg pulse-btn" onclick="openAbsenceModal()">
+            ➕ Zadať neprítomnosť
+          </button>
+        </div>
       </div>
 
       <!-- KARTY ZOSTATKOV PRE ZAMESTNANCA -->
@@ -396,7 +404,17 @@
         <div class="panel-box">
           <div class="panel-header">
             <h3>👥 Zoznam zamestnancov a ich prístupy</h3>
-            <button class="btn btn-primary btn-sm" onclick="openEmployeeModal()">➕ Pridať zamestnanca</button>
+            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+              <button class="btn btn-outline btn-sm" onclick="exportPasswordsCsv()" title="Stiahnuť zoznam všetkých zamestnancov s ich heslami">
+                📥 Stiahnuť heslá do Excelu (CSV)
+              </button>
+              <button class="btn btn-outline btn-sm" onclick="openChangePinModal()" title="Zmeniť heslo správcu">
+                🔑 Zmeniť heslo správcu
+              </button>
+              <button class="btn btn-primary btn-sm" onclick="openEmployeeModal()">
+                ➕ Pridať zamestnanca
+              </button>
+            </div>
           </div>
           <div class="table-responsive">
             <table class="data-table">
@@ -622,6 +640,43 @@
         <button class="btn btn-primary" onclick="openAbsenceForDate()">+ Pridať absenciu na tento deň</button>
         <button class="btn btn-outline" onclick="closeDayDetailModal()">Zavrieť</button>
       </div>
+    </div>
+  </div>
+
+  <!-- MODAL: ZMENA HESLA / PINU -->
+  <div id="changePinModal" class="modal-backdrop" style="display: none;">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 id="changePinModalTitle">🔑 Zmena prihlasovacieho hesla / PINu</h3>
+        <button class="modal-close-btn" onclick="closeChangePinModal()">✕</button>
+      </div>
+      <form id="changePinForm" onsubmit="handleChangePinSubmit(event)">
+        <input type="hidden" id="changePinEmpId">
+
+        <div class="form-group" id="oldPinGroup">
+          <label for="oldPinInput">Pôvodné heslo / PIN *</label>
+          <input type="password" id="oldPinInput" class="form-control pin-input" maxlength="12" placeholder="••••">
+        </div>
+
+        <div class="form-group">
+          <label for="newPinInput">Nové heslo / PIN *</label>
+          <input type="password" id="newPinInput" class="form-control pin-input" maxlength="12" placeholder="••••" required>
+          <small class="form-hint">Môže to byť 4-miestne číslo alebo textové heslo.</small>
+        </div>
+
+        <div class="form-group">
+          <label for="confirmPinInput">Zopakujte nové heslo / PIN *</label>
+          <input type="password" id="confirmPinInput" class="form-control pin-input" maxlength="12" placeholder="••••" required>
+        </div>
+
+        <div id="changePinError" class="alert alert-danger" style="display: none;"></div>
+        <div id="changePinSuccess" class="alert alert-success" style="display: none; background:#d1fae5; color:#065f46; border:1px solid #a7f3d0;"></div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" onclick="closeChangePinModal()">Zrušiť</button>
+          <button type="submit" class="btn btn-primary">Uložiť nové heslo 💾</button>
+        </div>
+      </form>
     </div>
   </div>
 

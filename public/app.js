@@ -226,6 +226,8 @@ function applyLogin(user) {
   
   const userBadge = document.getElementById('userBadge');
   const userNameDisplay = document.getElementById('userNameDisplay');
+  const changePinHeaderBtn = document.getElementById('changePinHeaderBtn');
+  if (changePinHeaderBtn) changePinHeaderBtn.style.display = 'inline-flex';
 
   userNameDisplay.textContent = user.name;
   if (user.role === 'admin') {
@@ -247,6 +249,8 @@ function logout() {
   document.getElementById('userNameDisplay').textContent = 'Neprihlásený';
   document.getElementById('userBadge').textContent = 'Odhlásený';
   document.getElementById('userBadge').className = 'badge-role';
+  const changePinHeaderBtn = document.getElementById('changePinHeaderBtn');
+  if (changePinHeaderBtn) changePinHeaderBtn.style.display = 'none';
   showSection('loginSection');
 }
 
@@ -265,7 +269,11 @@ function showSection(sectionId) {
 // --- NAČÍTANIE ZAMESTNANCOV ---
 async function loadEmployees() {
   try {
-    const res = await fetch('/api/employees');
+    const headers = {};
+    if (state.currentUser && state.currentUser.role === 'admin' && state.currentUser.pin) {
+      headers['x-admin-pin'] = state.currentUser.pin;
+    }
+    const res = await fetch('/api/employees', { headers });
     if (!res.ok) throw new Error('Chyba načítania zamestnancov');
     state.employees = await res.json();
 
@@ -890,8 +898,9 @@ function renderEmployeesTable() {
       <td><span style="display:inline-block;width:20px;height:20px;border-radius:4px;background:${emp.color};border:1px solid #ccc"></span></td>
       <td>
         <button class="btn btn-xs btn-primary" onclick="openAbsenceModalWithPrefill(${emp.id}, '')" title="Priamo zadať absenciu za tohto zamestnanca">➕ Zadať absenciu</button>
+        <button class="btn btn-xs btn-outline ml-2" onclick="openChangePinModalForEmployee(${emp.id}, '${emp.name.replace(/'/g, "\\'")}')" title="Zmeniť heslo tohto zamestnanca">🔑 Zmeniť heslo</button>
         <button class="btn btn-xs btn-outline ml-2" onclick="openEditEmployeeModal(${emp.id})">✏️ Upraviť</button>
-        ${emp.role !== 'admin' ? `<button class="btn btn-xs btn-outline ml-2" onclick="deleteEmployee(${emp.id})">🗑️ Deaktivovať</button>` : ''}
+        ${emp.role !== 'admin' ? `<button class="btn btn-xs btn-outline ml-2" style="color:#dc2626;border-color:#fecaca" onclick="deleteEmployee(${emp.id}, '${emp.name.replace(/'/g, "\\'")}')" title="Odobrať tohto zamestnanca">🗑️ Odobrať</button>` : ''}
       </td>
     `;
     tbody.appendChild(tr);
@@ -1233,12 +1242,19 @@ async function handleEmployeeSubmit(e) {
   try {
     const url = id ? `/api/employees/${id}` : '/api/employees';
     const method = id ? 'PUT' : 'POST';
+    const headers = { 'Content-Type': 'application/json' };
+    if (state.currentUser && state.currentUser.pin) {
+      headers['x-admin-pin'] = state.currentUser.pin;
+    }
     const res = await fetch(url, {
       method,
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify(payload)
     });
-    if (!res.ok) throw new Error('Chyba pri ukladaní zamestnanca');
+    if (!res.ok) {
+      const errData = await res.json();
+      throw new Error(errData.error || 'Chyba pri ukladaní zamestnanca');
+    }
 
     closeEmployeeModal();
     await loadEmployees();
@@ -1249,17 +1265,43 @@ async function handleEmployeeSubmit(e) {
   }
 }
 
-async function deleteEmployee(id) {
-  if (!confirm('Naozaj chcete deaktivovať tohto zamestnanca?')) return;
+async function deleteEmployee(id, empName) {
+  if (!state.currentUser || state.currentUser.role !== 'admin') {
+    alert('Iba administrátor môže odobrať zamestnanca.');
+    return;
+  }
+
+  const choice = confirm(
+    `Chcete odobrať zamestnanca "${empName}"?\n\n` +
+    `• Kliknite OK pre pokračovanie.\n` +
+    `• Kliknite ZRUŠIŤ, ak chcete akciu zrušiť.`
+  );
+  if (!choice) return;
+
+  const permanentChoice = confirm(
+    `Vyberte spôsob odobratia pre "${empName}":\n\n` +
+    `• OK = ÚPLNE A TRVALO VYMAZAŤ (odstráni zamestnanca aj všetky jeho absencie)\n` +
+    `• ZRUŠIŤ = IBA DEAKTIVOVAŤ (odporúčané - zamestnanec sa už nezobrazí, no jeho doterajšia dochádzka zostane v štatistikách)`
+  );
+
+  const isPermanent = permanentChoice ? 'true' : 'false';
   try {
-    const res = await fetch(`/api/employees/${id}`, { method: 'DELETE' });
-    if (res.ok) {
-      await loadEmployees();
-      renderEmployeesTable();
-      loadManagerData();
+    const res = await fetch(`/api/employees/${id}?permanent=${isPermanent}`, {
+      method: 'DELETE',
+      headers: {
+        'x-admin-pin': state.currentUser.pin
+      }
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || 'Chyba pri odoberaní zamestnanca');
     }
+    await loadEmployees();
+    renderEmployeesTable();
+    loadManagerData();
+    alert(`Zamestnanec "${empName}" bol úspešne ${permanentChoice ? 'natrvalo vymazaný' : 'deaktivovaný'}.`);
   } catch (e) {
-    alert('Chyba pri mazaní zamestnanca');
+    alert(e.message);
   }
 }
 
@@ -1330,6 +1372,114 @@ function openAbsenceForDate() {
 function exportDataCsv() {
   const year = state.currentYear;
   window.open(`/api/export?year=${year}`, '_blank');
+}
+
+// Export všetkých hesiel / PINov do Excel tabuľky (IBA PRE ADMINISTRÁTORA)
+function exportPasswordsCsv() {
+  if (!state.currentUser || state.currentUser.role !== 'admin') {
+    alert('Prístup zamietnutý. Zoznam hesiel môže stiahnuť iba overený administrátor.');
+    return;
+  }
+  window.open(`/api/export-passwords?admin_pin=${encodeURIComponent(state.currentUser.pin)}`, '_blank');
+}
+
+// ========================================================
+// MODAL ZMENA HESLA / PINU
+// ========================================================
+function openChangePinModal() {
+  if (!state.currentUser) return;
+  const modal = document.getElementById('changePinModal');
+  const form = document.getElementById('changePinForm');
+  form.reset();
+  document.getElementById('changePinError').style.display = 'none';
+  document.getElementById('changePinSuccess').style.display = 'none';
+
+  document.getElementById('changePinEmpId').value = state.currentUser.id;
+  document.getElementById('changePinModalTitle').textContent = `🔑 Zmena hesla / PINu (${state.currentUser.name})`;
+  document.getElementById('oldPinGroup').style.display = 'block';
+
+  modal.style.display = 'flex';
+}
+
+function openChangePinModalForEmployee(empId, empName) {
+  const modal = document.getElementById('changePinModal');
+  const form = document.getElementById('changePinForm');
+  form.reset();
+  document.getElementById('changePinError').style.display = 'none';
+  document.getElementById('changePinSuccess').style.display = 'none';
+
+  document.getElementById('changePinEmpId').value = empId;
+  document.getElementById('changePinModalTitle').textContent = `🔑 Zmena hesla pre: ${empName}`;
+  // Manažér nemusí poznať staré heslo zamestnanca pri zmene
+  document.getElementById('oldPinGroup').style.display = 'none';
+
+  modal.style.display = 'flex';
+}
+
+function closeChangePinModal() {
+  document.getElementById('changePinModal').style.display = 'none';
+}
+
+async function handleChangePinSubmit(e) {
+  e.preventDefault();
+  const empId = document.getElementById('changePinEmpId').value;
+  const oldPin = document.getElementById('oldPinInput').value;
+  const newPin = document.getElementById('newPinInput').value.trim();
+  const confirmPin = document.getElementById('confirmPinInput').value.trim();
+  const errDiv = document.getElementById('changePinError');
+  const successDiv = document.getElementById('changePinSuccess');
+
+  errDiv.style.display = 'none';
+  successDiv.style.display = 'none';
+
+  if (!newPin) {
+    errDiv.textContent = 'Zadajte nové heslo / PIN.';
+    errDiv.style.display = 'block';
+    return;
+  }
+
+  if (newPin !== confirmPin) {
+    errDiv.textContent = 'Nové heslá sa nezhodujú!';
+    errDiv.style.display = 'block';
+    return;
+  }
+
+  const isAdminChange = (state.currentUser && state.currentUser.role === 'admin' && Number(empId) !== state.currentUser.id);
+
+  try {
+    const res = await fetch('/api/change-pin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        employeeId: empId,
+        oldPin: oldPin.trim(),
+        newPin,
+        isAdminChange
+      })
+    });
+
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Chyba pri zmene hesla');
+
+    successDiv.textContent = '✅ Heslo bolo úspešne zmenené!';
+    successDiv.style.display = 'block';
+
+    // Aktualizácia v zozname zamestnancov a lokálnom stave
+    await loadEmployees();
+    renderEmployeesTable();
+
+    if (state.currentUser && Number(empId) === state.currentUser.id) {
+      state.currentUser.pin = newPin;
+      localStorage.setItem('sp_asistent_user', JSON.stringify(state.currentUser));
+    }
+
+    setTimeout(() => {
+      closeChangePinModal();
+    }, 1200);
+  } catch (err) {
+    errDiv.textContent = err.message;
+    errDiv.style.display = 'block';
+  }
 }
 
 // --- POMOCNÉ FUNKCIE ---
