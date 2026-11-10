@@ -1,0 +1,1341 @@
+/**
+ * SP ASISTENT - Frontend Aplikácia
+ * Kalendár na celý rok, evidencia absencií, mobilné PWA rozhranie
+ */
+
+// --- GLOBÁLNY STAV ---
+const state = {
+  currentUser: null,
+  employees: [],
+  absences: [],
+  holidays: [],
+  currentYear: 2026,
+  empCurrentDate: new Date(),
+  matrixMonth: new Date().getMonth() + 1,
+  activeMgrTab: 'year',
+  selectedDateForModal: null,
+  deferredPwaPrompt: null
+};
+
+const ABSENCE_NAMES = {
+  'dovolenka': 'Dovolenka',
+  'pn': 'PN (Práceneschopnosť)',
+  'ocr': 'OČR (Ošetrovanie člena rodiny)',
+  'lekar': 'Lekár / Prehliadka',
+  'nahradne_volno': 'Náhradné voľno',
+  'ine': 'Iné voľno'
+};
+
+const ABSENCE_ICONS = {
+  'dovolenka': '🏖️',
+  'pn': '🤒',
+  'ocr': '👶',
+  'lekar': '🩺',
+  'nahradne_volno': '⏱️',
+  'ine': '📁'
+};
+
+const MONTH_NAMES = [
+  'Január', 'Február', 'Marec', 'Apríl', 'Máj', 'Jún',
+  'Júl', 'August', 'September', 'Október', 'November', 'December'
+];
+
+// --- PWA REGISTRÁCIA A INŠTALÁCIA ---
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js')
+      .then(reg => console.log('Service Worker zaregistrovaný:', reg.scope))
+      .catch(err => console.log('Chyba Service Workera:', err));
+  });
+}
+
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  state.deferredPwaPrompt = e;
+  const pwaBtn = document.getElementById('pwaInstallBtn');
+  if (pwaBtn) pwaBtn.style.display = 'inline-flex';
+});
+
+document.addEventListener('DOMContentLoaded', () => {
+  initApp();
+});
+
+// --- INICIALIZÁCIA ---
+async function initApp() {
+  setupEventListeners();
+  await loadEmployees();
+  checkSavedAuth();
+  updatePwaButton();
+}
+
+function setupEventListeners() {
+  // PWA Inštalácia
+  const pwaBtn = document.getElementById('pwaInstallBtn');
+  if (pwaBtn) {
+    pwaBtn.addEventListener('click', async () => {
+      if (state.deferredPwaPrompt) {
+        state.deferredPwaPrompt.prompt();
+        const { outcome } = await state.deferredPwaPrompt.userChoice;
+        console.log('PWA Inštalácia:', outcome);
+        state.deferredPwaPrompt = null;
+        pwaBtn.style.display = 'none';
+      } else {
+        alert('V mobilnom prehliadači Safari: kliknite na tlačidlo Zdieľať ⭡ a zvoľte „Pridať na plochu“.\nV Chrome kliknite na menu ⋮ a zvoľte „Inštalovať aplikáciu“.');
+      }
+    });
+  }
+
+  // Odhlásenie
+  const logoutBtn = document.getElementById('logoutBtn');
+  if (logoutBtn) {
+    logoutBtn.addEventListener('click', logout);
+  }
+
+  // Formulár prihlásenia zamestnanec
+  const empForm = document.getElementById('employeeLoginForm');
+  if (empForm) {
+    empForm.addEventListener('submit', handleEmployeeLogin);
+  }
+
+  // Formulár prihlásenia manažér
+  const mgrForm = document.getElementById('managerLoginForm');
+  if (mgrForm) {
+    mgrForm.addEventListener('submit', handleManagerLogin);
+  }
+}
+
+function updatePwaButton() {
+  const pwaBtn = document.getElementById('pwaInstallBtn');
+  if (!pwaBtn) return;
+  // Detekcia či už beží ako PWA
+  const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
+  if (isStandalone) {
+    pwaBtn.style.display = 'none';
+  } else {
+    pwaBtn.style.display = 'inline-flex';
+  }
+}
+
+// --- AUTENTIFIKÁCIA ---
+function checkSavedAuth() {
+  const saved = localStorage.getItem('sp_asistent_user');
+  if (saved) {
+    try {
+      const user = JSON.parse(saved);
+      applyLogin(user);
+      return;
+    } catch (e) {
+      localStorage.removeItem('sp_asistent_user');
+    }
+  }
+  showSection('loginSection');
+}
+
+function switchLoginTab(type) {
+  const tabEmp = document.getElementById('tabEmployee');
+  const tabMgr = document.getElementById('tabManager');
+  const formEmp = document.getElementById('employeeLoginForm');
+  const formMgr = document.getElementById('managerLoginForm');
+  const errDiv = document.getElementById('loginError');
+  errDiv.style.display = 'none';
+
+  if (type === 'employee') {
+    tabEmp.classList.add('active');
+    tabMgr.classList.remove('active');
+    formEmp.style.display = 'block';
+    formMgr.style.display = 'none';
+  } else {
+    tabMgr.classList.add('active');
+    tabEmp.classList.remove('active');
+    formMgr.style.display = 'block';
+    formEmp.style.display = 'none';
+  }
+}
+
+async function handleEmployeeLogin(e) {
+  e.preventDefault();
+  const select = document.getElementById('loginEmployeeSelect');
+  const pinInput = document.getElementById('loginEmployeePin');
+  const remember = document.getElementById('rememberMeEmployee').checked;
+  const errDiv = document.getElementById('loginError');
+  errDiv.style.display = 'none';
+
+  const employeeId = select.value;
+  const pin = pinInput.value.trim();
+
+  if (!employeeId || !pin) {
+    showLoginError('Vyberte svoje meno a zadajte PIN.');
+    return;
+  }
+
+  try {
+    const res = await fetch('/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ employeeId, pin })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Nesprávny PIN');
+
+    if (remember) {
+      localStorage.setItem('sp_asistent_user', JSON.stringify(data.user));
+    }
+    applyLogin(data.user);
+  } catch (err) {
+    showLoginError(err.message);
+  }
+}
+
+async function handleManagerLogin(e) {
+  e.preventDefault();
+  const pinInput = document.getElementById('loginManagerPin');
+  const remember = document.getElementById('rememberMeManager').checked;
+  const pin = pinInput.value.trim();
+
+  if (!pin) {
+    showLoginError('Zadajte PIN manažéra.');
+    return;
+  }
+
+  try {
+    const res = await fetch('/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ employeeId: 'admin', pin })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Nesprávny PIN manažéra');
+
+    if (remember) {
+      localStorage.setItem('sp_asistent_user', JSON.stringify(data.user));
+    }
+    applyLogin(data.user);
+  } catch (err) {
+    showLoginError(err.message);
+  }
+}
+
+function showLoginError(msg) {
+  const errDiv = document.getElementById('loginError');
+  errDiv.textContent = msg;
+  errDiv.style.display = 'block';
+}
+
+function applyLogin(user) {
+  state.currentUser = user;
+  
+  const userBadge = document.getElementById('userBadge');
+  const userNameDisplay = document.getElementById('userNameDisplay');
+
+  userNameDisplay.textContent = user.name;
+  if (user.role === 'admin') {
+    userBadge.textContent = '👑 Správca / Manažér';
+    userBadge.className = 'badge-role admin';
+    showSection('managerViewSection');
+    loadManagerData();
+  } else {
+    userBadge.textContent = '👤 Zamestnanec';
+    userBadge.className = 'badge-role employee';
+    showSection('employeeViewSection');
+    loadEmployeeData();
+  }
+}
+
+function logout() {
+  localStorage.removeItem('sp_asistent_user');
+  state.currentUser = null;
+  document.getElementById('userNameDisplay').textContent = 'Neprihlásený';
+  document.getElementById('userBadge').textContent = 'Odhlásený';
+  document.getElementById('userBadge').className = 'badge-role';
+  showSection('loginSection');
+}
+
+function showSection(sectionId) {
+  document.querySelectorAll('.view-section').forEach(sec => {
+    sec.style.display = 'none';
+    sec.classList.remove('active');
+  });
+  const target = document.getElementById(sectionId);
+  if (target) {
+    target.style.display = 'block';
+    target.classList.add('active');
+  }
+}
+
+// --- NAČÍTANIE ZAMESTNANCOV ---
+async function loadEmployees() {
+  try {
+    const res = await fetch('/api/employees');
+    if (!res.ok) throw new Error('Chyba načítania zamestnancov');
+    state.employees = await res.json();
+
+    // Naplnenie dropdownov
+    populateEmployeeDropdowns();
+  } catch (e) {
+    console.error('loadEmployees error:', e);
+  }
+}
+
+function populateEmployeeDropdowns() {
+  const loginSelect = document.getElementById('loginEmployeeSelect');
+  const absenceSelect = document.getElementById('absenceEmployee');
+  const mgrFilter = document.getElementById('mgrEmployeeFilter');
+
+  if (loginSelect) {
+    loginSelect.innerHTML = '<option value="">-- Vyberte svoje meno --</option>';
+    state.employees.filter(e => e.role === 'employee').forEach(emp => {
+      const opt = document.createElement('option');
+      opt.value = emp.id;
+      opt.textContent = emp.name;
+      loginSelect.appendChild(opt);
+    });
+  }
+
+  if (absenceSelect) {
+    absenceSelect.innerHTML = '';
+    state.employees.forEach(emp => {
+      const opt = document.createElement('option');
+      opt.value = emp.id;
+      opt.textContent = emp.name + (emp.role === 'admin' ? ' (Manažér)' : '');
+      absenceSelect.appendChild(opt);
+    });
+  }
+
+  if (mgrFilter) {
+    mgrFilter.innerHTML = '<option value="">Všetci zamestnanci</option>';
+    state.employees.forEach(emp => {
+      const opt = document.createElement('option');
+      opt.value = emp.id;
+      opt.textContent = emp.name;
+      mgrFilter.appendChild(opt);
+    });
+  }
+}
+
+// --- NAČÍTANIE SVIATKOV ---
+async function loadHolidays(year) {
+  try {
+    const res = await fetch(`/api/holidays?year=${year}`);
+    if (res.ok) {
+      state.holidays = await res.json();
+    }
+  } catch (e) {
+    console.error('loadHolidays error:', e);
+  }
+}
+
+// ========================================================
+// REŽIM ZAMESTNANEC
+// ========================================================
+async function loadEmployeeData() {
+  if (!state.currentUser) return;
+  document.getElementById('empGreetingName').textContent = state.currentUser.name;
+
+  await loadHolidays(state.currentYear);
+  await fetchEmployeeAbsences();
+  renderEmployeeCalendar();
+  updateEmployeeStats();
+}
+
+async function fetchEmployeeAbsences() {
+  try {
+    const res = await fetch(`/api/absences?employee_id=${state.currentUser.id}&year=${state.currentYear}`);
+    if (res.ok) {
+      state.absences = await res.json();
+      renderEmployeeAbsenceList();
+    }
+  } catch (e) {
+    console.error('fetchEmployeeAbsences error:', e);
+  }
+}
+
+function updateEmployeeStats() {
+  const user = state.currentUser;
+  let usedVacation = 0;
+  let pnDays = 0;
+  let ocrDays = 0;
+  let docDays = 0;
+  let docHours = 0;
+
+  state.absences.forEach(a => {
+    if (a.status === 'rejected') return;
+    const days = a.working_days || 0;
+    if (a.type === 'dovolenka') usedVacation += days;
+    else if (a.type === 'pn') pnDays += days;
+    else if (a.type === 'ocr') ocrDays += days;
+    else if (a.type === 'lekar') {
+      docDays += days;
+      if (a.hours) docHours += Number(a.hours);
+    }
+  });
+
+  const totalVacation = user.annual_leave_days || 25;
+  const remaining = totalVacation - usedVacation;
+
+  document.getElementById('empTotalVacation').textContent = totalVacation;
+  document.getElementById('empUsedVacation').textContent = usedVacation.toFixed(1);
+  document.getElementById('empRemainingVacation').textContent = remaining.toFixed(1);
+  document.getElementById('empPnDays').textContent = pnDays.toFixed(1);
+  document.getElementById('empOcrDays').textContent = ocrDays.toFixed(1);
+  document.getElementById('empDocDays').textContent = docDays.toFixed(1);
+  document.getElementById('empDocHours').textContent = docHours.toFixed(1);
+}
+
+function renderEmployeeCalendar() {
+  const grid = document.getElementById('empMonthCalendarGrid');
+  const label = document.getElementById('empCurrentMonthLabel');
+  grid.innerHTML = '';
+
+  const d = state.empCurrentDate;
+  const year = d.getFullYear();
+  const month = d.getMonth();
+
+  label.textContent = `${MONTH_NAMES[month]} ${year}`;
+
+  const firstDay = new Date(year, month, 1);
+  const lastDay = new Date(year, month + 1, 0);
+
+  // Deň v týždni pre 1. deň (0 = nedeľa, pretransformujeme na 0 = pondelok)
+  let startCol = firstDay.getDay() - 1;
+  if (startCol === -1) startCol = 6;
+
+  // Prázdne bunky pred 1. dňom
+  for (let i = 0; i < startCol; i++) {
+    const emptyCell = document.createElement('div');
+    emptyCell.className = 'cal-day empty';
+    grid.appendChild(emptyCell);
+  }
+
+  const holidaysMap = {};
+  state.holidays.forEach(h => { holidaysMap[h.date] = h.name; });
+
+  const todayStr = new Date().toISOString().split('T')[0];
+
+  for (let day = 1; day <= lastDay.getDate(); day++) {
+    const dayStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    const dayDate = new Date(year, month, day);
+    const dayOfWeek = dayDate.getDay();
+    const isWeekend = (dayOfWeek === 0 || dayOfWeek === 6);
+    const isHoliday = holidaysMap[dayStr];
+    const isToday = (dayStr === todayStr);
+
+    const cell = document.createElement('div');
+    cell.className = 'cal-day';
+    if (isWeekend) cell.classList.add('weekend');
+    if (isHoliday) {
+      cell.classList.add('holiday');
+      cell.title = isHoliday;
+    }
+    if (isToday) cell.classList.add('today');
+
+    cell.innerHTML = `<span class="day-num">${day}</span>`;
+
+    // Nájdenie absencií pre daný deň
+    const dayAbsences = state.absences.filter(a => dayStr >= a.start_date && dayStr <= a.end_date);
+    if (dayAbsences.length > 0) {
+      cell.classList.add('has-absence');
+      const dotsDiv = document.createElement('div');
+      dotsDiv.className = 'day-dots';
+      dayAbsences.forEach(a => {
+        const dot = document.createElement('span');
+        dot.className = `day-dot dot-${a.type}`;
+        dot.title = `${ABSENCE_NAMES[a.type] || a.type}: ${a.note || ''}`;
+        dotsDiv.appendChild(dot);
+      });
+      cell.appendChild(dotsDiv);
+    }
+
+    cell.addEventListener('click', () => openDayDetail(dayStr));
+    grid.appendChild(cell);
+  }
+}
+
+function changeEmpMonth(delta) {
+  state.empCurrentDate.setMonth(state.empCurrentDate.getMonth() + delta);
+  renderEmployeeCalendar();
+}
+
+function renderEmployeeAbsenceList() {
+  const container = document.getElementById('empAbsenceList');
+  container.innerHTML = '';
+
+  if (state.absences.length === 0) {
+    container.innerHTML = '<p class="text-muted text-center p-3">Zatiaľ nemáte nahlásené žiadne neprítomnosti.</p>';
+    return;
+  }
+
+  state.absences.forEach(a => {
+    const item = document.createElement('div');
+    item.className = 'timeline-item';
+
+    const icon = ABSENCE_ICONS[a.type] || '📌';
+    const name = ABSENCE_NAMES[a.type] || a.type;
+    const workingDays = a.working_days ? `${a.working_days} prac. dní` : '';
+    const hours = a.hours ? ` (${a.hours} hod.)` : (a.is_half_day ? ' (pol dňa)' : '');
+
+    item.innerHTML = `
+      <div class="timeline-left">
+        <span class="timeline-icon">${icon}</span>
+        <div>
+          <div class="timeline-dates">${formatDate(a.start_date)} - ${formatDate(a.end_date)}</div>
+          <div class="timeline-meta"><strong>${name}</strong> • ${workingDays}${hours} ${a.note ? `• <em>${a.note}</em>` : ''}</div>
+        </div>
+      </div>
+      <div>
+        <button class="btn btn-xs btn-outline" onclick="deleteAbsence(${a.id})" title="Zmazať neprítomnosť">🗑️ Zmazať</button>
+      </div>
+    `;
+    container.appendChild(item);
+  });
+}
+
+// ========================================================
+// REŽIM MANAŽÉR
+// ========================================================
+async function loadManagerData() {
+  const yearSelect = document.getElementById('mgrYearSelect');
+  state.currentYear = Number(yearSelect.value);
+  document.getElementById('yearDisplayTitle').textContent = state.currentYear;
+  document.getElementById('statsYearLabel').textContent = state.currentYear;
+
+  await loadHolidays(state.currentYear);
+  await fetchManagerAbsences();
+  await loadManagerStats();
+  renderActiveManagerTab();
+  initQrCodeView();
+}
+
+async function fetchManagerAbsences() {
+  const empFilter = document.getElementById('mgrEmployeeFilter').value;
+  let url = `/api/absences?year=${state.currentYear}`;
+  if (empFilter) url += `&employee_id=${empFilter}`;
+
+  try {
+    const res = await fetch(url);
+    if (res.ok) {
+      state.absences = await res.json();
+    }
+  } catch (e) {
+    console.error('fetchManagerAbsences error:', e);
+  }
+}
+
+async function loadManagerStats() {
+  try {
+    const res = await fetch(`/api/stats?year=${state.currentYear}`);
+    if (res.ok) {
+      const data = await res.json();
+      renderStatsCards(data.stats);
+      renderStatsTable(data.stats);
+    }
+  } catch (e) {
+    console.error('loadManagerStats error:', e);
+  }
+}
+
+function renderStatsCards(statsList) {
+  const container = document.getElementById('managerSummaryCards');
+  if (!container) return;
+
+  let totalVacationUsed = 0;
+  let totalPnDays = 0;
+  let totalOcrDays = 0;
+  let totalEmployees = statsList.length;
+
+  statsList.forEach(s => {
+    totalVacationUsed += s.used_vacation_days;
+    totalPnDays += s.pn_days;
+    totalOcrDays += s.ocr_days;
+  });
+
+  container.innerHTML = `
+    <div class="stat-card">
+      <div class="stat-icon">👥</div>
+      <div class="stat-content">
+        <div class="stat-label">Aktívni zamestnanci</div>
+        <div class="stat-value">${totalEmployees}</div>
+        <div class="stat-sub">v tíme</div>
+      </div>
+    </div>
+    <div class="stat-card vacation-card">
+      <div class="stat-icon">🏖️</div>
+      <div class="stat-content">
+        <div class="stat-label">Vyčerpaná dovolenka tímu</div>
+        <div class="stat-value">${totalVacationUsed.toFixed(1)} <small>dní</small></div>
+        <div class="stat-sub">v roku ${state.currentYear}</div>
+      </div>
+    </div>
+    <div class="stat-card pn-card">
+      <div class="stat-icon">🤒</div>
+      <div class="stat-content">
+        <div class="stat-label">PN tímu celkovo</div>
+        <div class="stat-value">${totalPnDays.toFixed(1)} <small>dní</small></div>
+        <div class="stat-sub">v roku ${state.currentYear}</div>
+      </div>
+    </div>
+    <div class="stat-card ocr-card">
+      <div class="stat-icon">👶</div>
+      <div class="stat-content">
+        <div class="stat-label">OČR celkovo</div>
+        <div class="stat-value">${totalOcrDays.toFixed(1)} <small>dní</small></div>
+        <div class="stat-sub">v roku ${state.currentYear}</div>
+      </div>
+    </div>
+  `;
+}
+
+function switchManagerTab(tabKey) {
+  state.activeMgrTab = tabKey;
+  document.querySelectorAll('.mgr-tab').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.mgr-tab-content').forEach(c => c.classList.remove('active'));
+
+  const tabBtns = {
+    'year': 0, 'matrix': 1, 'list': 2, 'stats': 3, 'employees': 4, 'mobile-qr': 5
+  };
+  const allBtns = document.querySelectorAll('.mgr-tab');
+  if (allBtns[tabBtns[tabKey]]) allBtns[tabBtns[tabKey]].classList.add('active');
+
+  const contentMap = {
+    'year': 'mgrTabYear',
+    'matrix': 'mgrTabMatrix',
+    'list': 'mgrTabList',
+    'stats': 'mgrTabStats',
+    'employees': 'mgrTabEmployees',
+    'mobile-qr': 'mgrTabMobileQr'
+  };
+  const target = document.getElementById(contentMap[tabKey]);
+  if (target) target.classList.add('active');
+
+  renderActiveManagerTab();
+}
+
+function renderActiveManagerTab() {
+  switch (state.activeMgrTab) {
+    case 'year':
+      renderYearCalendar();
+      break;
+    case 'matrix':
+      renderMatrixView();
+      break;
+    case 'list':
+      renderAbsenceTable();
+      break;
+    case 'stats':
+      loadManagerStats();
+      break;
+    case 'employees':
+      renderEmployeesTable();
+      break;
+    case 'mobile-qr':
+      initQrCodeView();
+      break;
+  }
+}
+
+function onManagerYearChange() {
+  loadManagerData();
+}
+
+// --- 1. CELOROČNÝ KALENDÁR (12 MESIACOV) ---
+function renderYearCalendar() {
+  const container = document.getElementById('yearMonthsGrid');
+  container.innerHTML = '';
+
+  const holidaysMap = {};
+  state.holidays.forEach(h => { holidaysMap[h.date] = h.name; });
+
+  const year = state.currentYear;
+  const todayStr = new Date().toISOString().split('T')[0];
+
+  for (let m = 0; m < 12; m++) {
+    const monthCard = document.createElement('div');
+    monthCard.className = 'month-mini-card';
+
+    const monthTitle = document.createElement('div');
+    monthTitle.className = 'month-mini-title';
+    monthTitle.textContent = `${MONTH_NAMES[m]}`;
+    monthCard.appendChild(monthTitle);
+
+    const weekdays = document.createElement('div');
+    weekdays.className = 'mini-cal-weekdays';
+    weekdays.innerHTML = '<span>P</span><span>U</span><span>S</span><span>Š</span><span>P</span><span style="color:#ef4444">S</span><span style="color:#ef4444">N</span>';
+    monthCard.appendChild(weekdays);
+
+    const daysGrid = document.createElement('div');
+    daysGrid.className = 'mini-cal-days';
+
+    const firstDay = new Date(year, m, 1);
+    const lastDay = new Date(year, m + 1, 0);
+
+    let startCol = firstDay.getDay() - 1;
+    if (startCol === -1) startCol = 6;
+
+    for (let i = 0; i < startCol; i++) {
+      const empty = document.createElement('div');
+      empty.className = 'mini-day empty';
+      daysGrid.appendChild(empty);
+    }
+
+    for (let d = 1; d <= lastDay.getDate(); d++) {
+      const dateStr = `${year}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      const dayDate = new Date(year, m, d);
+      const isWeekend = (dayDate.getDay() === 0 || dayDate.getDay() === 6);
+      const holidayName = holidaysMap[dateStr];
+      const isToday = (dateStr === todayStr);
+
+      const cell = document.createElement('div');
+      cell.className = 'mini-day';
+      if (isWeekend) cell.classList.add('weekend');
+      if (holidayName) {
+        cell.classList.add('holiday');
+        cell.title = holidayName;
+      }
+      if (isToday) cell.style.border = '1px solid var(--primary)';
+
+      cell.textContent = d;
+
+      // Absencie pre tento deň
+      const dayAbs = state.absences.filter(a => dateStr >= a.start_date && dateStr <= a.end_date);
+      if (dayAbs.length > 0) {
+        cell.classList.add('has-absence');
+        const dots = document.createElement('div');
+        dots.className = 'mini-day-dots';
+        // Max 3 bodky
+        dayAbs.slice(0, 3).forEach(a => {
+          const dot = document.createElement('span');
+          dot.className = `mini-dot dot-${a.type}`;
+          dots.appendChild(dot);
+        });
+        cell.appendChild(dots);
+      }
+
+      cell.addEventListener('click', () => openDayDetail(dateStr));
+      daysGrid.appendChild(cell);
+    }
+
+    monthCard.appendChild(daysGrid);
+    container.appendChild(monthCard);
+  }
+}
+
+// --- 2. TÍMOVÁ MATICA ---
+function renderMatrixView() {
+  const table = document.getElementById('matrixTable');
+  table.innerHTML = '';
+
+  const month = Number(document.getElementById('matrixMonthSelect').value);
+  const year = state.currentYear;
+  const daysInMonth = new Date(year, month, 0).getDate();
+
+  const holidaysMap = {};
+  state.holidays.forEach(h => { holidaysMap[h.date] = h.name; });
+
+  const weekdayShort = ['Ne', 'Po', 'Ut', 'St', 'Št', 'Pi', 'So'];
+
+  // 1. Hlavička tabuľky
+  const thead = document.createElement('thead');
+  const trDays = document.createElement('tr');
+  const thEmp = document.createElement('th');
+  thEmp.className = 'emp-name-col';
+  thEmp.textContent = 'Zamestnanec';
+  trDays.appendChild(thEmp);
+
+  for (let day = 1; day <= daysInMonth; day++) {
+    const dayDate = new Date(year, month - 1, day);
+    const dayOfWeek = dayDate.getDay();
+    const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    const isWeekend = (dayOfWeek === 0 || dayOfWeek === 6);
+    const isHoliday = holidaysMap[dateStr];
+
+    const th = document.createElement('th');
+    th.innerHTML = `${day}<br><span style="font-size:9px">${weekdayShort[dayOfWeek]}</span>`;
+    if (isWeekend) th.classList.add('weekend-col');
+    if (isHoliday) {
+      th.classList.add('holiday-col');
+      th.title = isHoliday;
+    }
+    trDays.appendChild(th);
+  }
+  thead.appendChild(trDays);
+  table.appendChild(thead);
+
+  // 2. Riadky zamestnancov
+  const tbody = document.createElement('tbody');
+  state.employees.forEach(emp => {
+    const tr = document.createElement('tr');
+    const tdName = document.createElement('td');
+    tdName.className = 'emp-name-col';
+    tdName.innerHTML = `<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${emp.color};margin-right:6px"></span><strong>${emp.name}</strong>`;
+    tr.appendChild(tdName);
+
+    for (let day = 1; day <= daysInMonth; day++) {
+      const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      const dayDate = new Date(year, month - 1, day);
+      const isWeekend = (dayDate.getDay() === 0 || dayDate.getDay() === 6);
+      const isHoliday = holidaysMap[dateStr];
+
+      const td = document.createElement('td');
+      if (isWeekend) td.classList.add('weekend-col');
+      if (isHoliday) td.classList.add('holiday-col');
+
+      // Absencia pre tohto zamestnanca
+      const abs = state.absences.find(a => a.employee_id === emp.id && dateStr >= a.start_date && dateStr <= a.end_date);
+      if (abs) {
+        const shortLabels = {
+          'dovolenka': 'D',
+          'pn': 'PN',
+          'ocr': 'OČR',
+          'lekar': 'P',
+          'nahradne_volno': 'NV',
+          'ine': 'I'
+        };
+        const badge = document.createElement('div');
+        badge.className = `matrix-cell-absence cell-${abs.type}`;
+        badge.textContent = shortLabels[abs.type] || 'A';
+        badge.title = `${emp.name}: ${ABSENCE_NAMES[abs.type]} (${abs.note || ''})`;
+        badge.addEventListener('click', () => openDayDetail(dateStr));
+        td.appendChild(badge);
+      } else {
+        td.addEventListener('click', () => {
+          openAbsenceModalWithPrefill(emp.id, dateStr);
+        });
+      }
+      tr.appendChild(td);
+    }
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+}
+
+function changeMatrixMonth(delta) {
+  const sel = document.getElementById('matrixMonthSelect');
+  let val = Number(sel.value) + delta;
+  if (val < 1) val = 12;
+  if (val > 12) val = 1;
+  sel.value = val;
+  renderMatrixView();
+}
+
+// --- 3. TABUĽKA VŠETKÝCH ABSENCIÍ ---
+function renderAbsenceTable() {
+  const tbody = document.getElementById('mgrAbsencesTableBody');
+  const typeFilter = document.getElementById('filterAbsenceType').value;
+  tbody.innerHTML = '';
+
+  let list = state.absences;
+  if (typeFilter) {
+    list = list.filter(a => a.type === typeFilter);
+  }
+
+  if (list.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted p-4">Žiadne absencie nezodpovedajú zvolenému filtru.</td></tr>';
+    return;
+  }
+
+  list.forEach(a => {
+    const tr = document.createElement('tr');
+    const icon = ABSENCE_ICONS[a.type] || '📌';
+    const name = ABSENCE_NAMES[a.type] || a.type;
+    const workingDays = a.working_days ? `${a.working_days.toFixed(1)} prac. dní` : '0';
+    const subInfo = a.hours ? ` (${a.hours} hod.)` : (a.is_half_day ? ' (pol dňa)' : '');
+
+    tr.innerHTML = `
+      <td><strong>${a.employee_name || 'Neznámy'}</strong></td>
+      <td><span class="legend-dot dot-${a.type}"></span> ${icon} ${name}</td>
+      <td>${formatDate(a.start_date)} - ${formatDate(a.end_date)}</td>
+      <td>${workingDays}${subInfo}</td>
+      <td>${a.note || '-'}</td>
+      <td><span class="badge-role" style="background:#e0f2fe;color:#0284c7">${a.status || 'schválené'}</span></td>
+      <td>
+        <button class="btn btn-xs btn-outline" onclick="deleteAbsence(${a.id})" title="Zmazať absenciu">🗑️ Zmazať</button>
+      </td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+// --- 4. ŠTATISTIKY A ZOSTATKY ---
+function renderStatsTable(statsList) {
+  const tbody = document.getElementById('mgrStatsTableBody');
+  tbody.innerHTML = '';
+
+  statsList.forEach(s => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${s.color};margin-right:6px"></span><strong>${s.name}</strong></td>
+      <td>${s.annual_leave_days} dní</td>
+      <td><strong style="color:var(--color-dovolenka)">${s.used_vacation_days.toFixed(1)}</strong> dní</td>
+      <td><strong style="color:${s.remaining_vacation_days < 0 ? '#ef4444' : '#10b981'}">${s.remaining_vacation_days.toFixed(1)}</strong> dní</td>
+      <td>${s.pn_days.toFixed(1)}</td>
+      <td>${s.ocr_days.toFixed(1)}</td>
+      <td>${s.doctor_days.toFixed(1)} d. ${s.doctor_hours ? `(${s.doctor_hours} h)` : ''}</td>
+      <td>${s.compensatory_leave_days.toFixed(1)}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+// --- 5. SPRÁVA ZAMESTNANCOV ---
+function renderEmployeesTable() {
+  const tbody = document.getElementById('mgrEmployeesTableBody');
+  tbody.innerHTML = '';
+
+  state.employees.forEach(emp => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><strong>${emp.name}</strong></td>
+      <td><span class="badge-role ${emp.role}">${emp.role === 'admin' ? 'Manažér' : 'Zamestnanec'}</span></td>
+      <td><code style="background:#f1f5f9;padding:2px 8px;border-radius:4px;font-weight:700;letter-spacing:2px">${emp.pin}</code></td>
+      <td>${emp.annual_leave_days} dní</td>
+      <td><span style="display:inline-block;width:20px;height:20px;border-radius:4px;background:${emp.color};border:1px solid #ccc"></span></td>
+      <td>
+        <button class="btn btn-xs btn-primary" onclick="openAbsenceModalWithPrefill(${emp.id}, '')" title="Priamo zadať absenciu za tohto zamestnanca">➕ Zadať absenciu</button>
+        <button class="btn btn-xs btn-outline ml-2" onclick="openEditEmployeeModal(${emp.id})">✏️ Upraviť</button>
+        ${emp.role !== 'admin' ? `<button class="btn btn-xs btn-outline ml-2" onclick="deleteEmployee(${emp.id})">🗑️ Deaktivovať</button>` : ''}
+      </td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+// --- 6. MOBILNÝ PRÍSTUP (QR KÓD) ---
+function initQrCodeView() {
+  const urlBox = document.getElementById('mobileNetworkUrl');
+  const currentOrigin = window.location.origin;
+  urlBox.textContent = currentOrigin;
+
+  // Vygenerujeme QR kód priamo cez Canvas bez závislostí
+  const container = document.getElementById('qrCodeContainer');
+  container.innerHTML = '';
+
+  const qrCanvas = document.createElement('canvas');
+  qrCanvas.width = 180;
+  qrCanvas.height = 180;
+  drawSimpleQr(qrCanvas, currentOrigin);
+  container.appendChild(qrCanvas);
+}
+
+function copyMobileUrl() {
+  const url = window.location.origin;
+  navigator.clipboard.writeText(url).then(() => {
+    alert('Odkaz skopírovaný do schránky:\n' + url);
+  });
+}
+
+// Jednoduchý QR generátor na canvas
+function drawSimpleQr(canvas, text) {
+  const ctx = canvas.getContext('2d');
+  const size = canvas.width;
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, size, size);
+
+  // Kreslenie štýlového náhľadu / QR vzoru
+  ctx.fillStyle = '#0f172a';
+  const margin = 12;
+  const qrSize = size - 2 * margin;
+  const cols = 21;
+  const cellSize = qrSize / cols;
+
+  // Jednoduchý deterministický hash pre matrix
+  let hash = 0;
+  for (let i = 0; i < text.length; i++) {
+    hash = ((hash << 5) - hash) + text.charCodeAt(i);
+    hash |= 0;
+  }
+
+  function drawFinder(x, y) {
+    ctx.fillRect(margin + x * cellSize, margin + y * cellSize, 7 * cellSize, 7 * cellSize);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(margin + (x + 1) * cellSize, margin + (y + 1) * cellSize, 5 * cellSize, 5 * cellSize);
+    ctx.fillStyle = '#0f172a';
+    ctx.fillRect(margin + (x + 2) * cellSize, margin + (y + 2) * cellSize, 3 * cellSize, 3 * cellSize);
+  }
+
+  // 3 pozičné štvorce
+  drawFinder(0, 0);
+  drawFinder(cols - 7, 0);
+  drawFinder(0, cols - 7);
+
+  // Dátové bunky
+  for (let r = 0; r < cols; r++) {
+    for (let c = 0; c < cols; c++) {
+      if ((r < 7 && c < 7) || (r < 7 && c >= cols - 7) || (r >= cols - 7 && c < 7)) continue;
+      const pseudoVal = Math.sin(r * 13 + c * 7 + hash) * 10000;
+      if (Math.abs(pseudoVal - Math.floor(pseudoVal)) > 0.45) {
+        ctx.fillRect(margin + c * cellSize, margin + r * cellSize, cellSize, cellSize);
+      }
+    }
+  }
+
+  // Logo v strede
+  const centerSize = 5 * cellSize;
+  const centerPos = margin + (cols / 2 - 2.5) * cellSize;
+  ctx.fillStyle = '#2563eb';
+  ctx.fillRect(centerPos, centerPos, centerSize, centerSize);
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 12px Inter, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('SP', centerPos + centerSize / 2, centerPos + centerSize / 2);
+}
+
+// ========================================================
+// MODAL ZADANIA ABSENCIE
+// ========================================================
+function openAbsenceModal() {
+  const modal = document.getElementById('absenceModal');
+  const form = document.getElementById('absenceForm');
+  form.reset();
+  document.getElementById('absenceId').value = '';
+
+  const todayStr = new Date().toISOString().split('T')[0];
+  document.getElementById('absenceStartDate').value = todayStr;
+  document.getElementById('absenceEndDate').value = todayStr;
+
+  const empSelect = document.getElementById('absenceEmployee');
+  const empGroup = document.getElementById('modalEmployeeSelectGroup');
+  const modalTitle = document.getElementById('absenceModalTitle');
+
+  if (state.currentUser && state.currentUser.role === 'admin') {
+    modalTitle.textContent = '👑 Zaevidovať neprítomnosť za zamestnanca';
+    empGroup.style.display = 'block';
+    // Vyberieme prvého bežného zamestnanca zo zoznamu
+    const regularEmployees = state.employees.filter(e => e.role === 'employee');
+    if (regularEmployees.length > 0) {
+      empSelect.value = regularEmployees[0].id;
+    } else if (state.employees.length > 0) {
+      empSelect.value = state.employees[0].id;
+    }
+  } else {
+    modalTitle.textContent = '➕ Zadať neprítomnosť do kalendára';
+    empGroup.style.display = 'none'; // Zamestnanec zadáva iba za seba
+    if (state.currentUser) empSelect.value = state.currentUser.id;
+  }
+
+  onAbsenceTypeChange();
+  calculateDaysLive();
+  modal.style.display = 'flex';
+}
+
+function openAbsenceModalForManager() {
+  openAbsenceModal();
+}
+
+function openAbsenceModalWithPrefill(empId, dateStr) {
+  openAbsenceModal();
+  if (empId) {
+    document.getElementById('absenceEmployee').value = empId;
+  }
+  if (dateStr) {
+    document.getElementById('absenceStartDate').value = dateStr;
+    document.getElementById('absenceEndDate').value = dateStr;
+  }
+  calculateDaysLive();
+}
+
+function closeAbsenceModal() {
+  document.getElementById('absenceModal').style.display = 'none';
+}
+
+function onAbsenceTypeChange() {
+  const type = document.querySelector('input[name="absenceType"]:checked').value;
+  const hoursGroup = document.getElementById('hoursInputGroup');
+  const halfCheck = document.getElementById('absenceHalfDay');
+
+  if (type === 'lekar') {
+    hoursGroup.style.display = 'block';
+  } else {
+    hoursGroup.style.display = 'none';
+    document.getElementById('absenceHours').value = '';
+  }
+  calculateDaysLive();
+}
+
+function onAbsenceDatesChange() {
+  const start = document.getElementById('absenceStartDate').value;
+  const end = document.getElementById('absenceEndDate').value;
+  if (start && (!end || end < start)) {
+    document.getElementById('absenceEndDate').value = start;
+  }
+  calculateDaysLive();
+}
+
+function setQuickDates(mode) {
+  const today = new Date();
+  let start = new Date();
+  let end = new Date();
+
+  if (mode === 'today') {
+    // Dnes
+  } else if (mode === 'tomorrow') {
+    start.setDate(today.getDate() + 1);
+    end.setDate(today.getDate() + 1);
+  } else if (mode === 'this_week') {
+    const day = today.getDay() || 7;
+    start.setDate(today.getDate() - day + 1);
+    end.setDate(today.getDate() - day + 5);
+  } else if (mode === 'next_week') {
+    const day = today.getDay() || 7;
+    start.setDate(today.getDate() - day + 8);
+    end.setDate(today.getDate() - day + 12);
+  }
+
+  document.getElementById('absenceStartDate').value = start.toISOString().split('T')[0];
+  document.getElementById('absenceEndDate').value = end.toISOString().split('T')[0];
+  calculateDaysLive();
+}
+
+function onSubDayChange() {
+  calculateDaysLive();
+}
+
+function calculateDaysLive() {
+  const startStr = document.getElementById('absenceStartDate').value;
+  const endStr = document.getElementById('absenceEndDate').value;
+  const isHalf = document.getElementById('absenceHalfDay').checked;
+  const hours = Number(document.getElementById('absenceHours').value) || 0;
+  const display = document.getElementById('calculatedWorkingDays');
+
+  if (!startStr || !endStr) {
+    display.textContent = '0.0';
+    return;
+  }
+
+  if (isHalf) {
+    display.textContent = '0.5';
+    return;
+  }
+  if (hours > 0) {
+    display.textContent = `${(hours / 8).toFixed(1)} (${hours} hod.)`;
+    return;
+  }
+
+  const start = new Date(startStr + 'T00:00:00Z');
+  const end = new Date(endStr + 'T00:00:00Z');
+  if (start > end) {
+    display.textContent = '0.0';
+    return;
+  }
+
+  const holidaysMap = new Set();
+  state.holidays.forEach(h => holidaysMap.add(h.date));
+
+  let count = 0;
+  const curr = new Date(start);
+  while (curr <= end) {
+    const dow = curr.getUTCDay();
+    const currStr = curr.toISOString().split('T')[0];
+    if (dow !== 0 && dow !== 6 && !holidaysMap.has(currStr)) {
+      count++;
+    }
+    curr.setUTCDate(curr.getUTCDate() + 1);
+  }
+
+  display.textContent = count.toFixed(1);
+}
+
+async function handleAbsenceSubmit(e) {
+  e.preventDefault();
+  const employeeId = document.getElementById('absenceEmployee').value;
+  const type = document.querySelector('input[name="absenceType"]:checked').value;
+  const startDate = document.getElementById('absenceStartDate').value;
+  const endDate = document.getElementById('absenceEndDate').value;
+  const isHalfDay = document.getElementById('absenceHalfDay').checked;
+  const hours = Number(document.getElementById('absenceHours').value) || 0;
+  const note = document.getElementById('absenceNote').value.trim();
+
+  const payload = {
+    employee_id: employeeId,
+    type,
+    start_date: startDate,
+    end_date: endDate,
+    is_half_day: isHalfDay ? 1 : 0,
+    hours,
+    note,
+    status: 'approved'
+  };
+
+  try {
+    const res = await fetch('/api/absences', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) throw new Error('Chyba pri ukladaní absencie');
+
+    closeAbsenceModal();
+
+    // Obnovenie dát podľa aktívneho režimu
+    if (state.currentUser.role === 'admin') {
+      loadManagerData();
+    } else {
+      loadEmployeeData();
+    }
+  } catch (err) {
+    alert(err.message);
+  }
+}
+
+async function deleteAbsence(id) {
+  if (!confirm('Naozaj chcete zmazať túto neprítomnosť?')) return;
+  try {
+    const res = await fetch(`/api/absences/${id}`, { method: 'DELETE' });
+    if (res.ok) {
+      if (state.currentUser.role === 'admin') {
+        loadManagerData();
+      } else {
+        loadEmployeeData();
+      }
+    }
+  } catch (e) {
+    alert('Chyba pri mazaní absencie');
+  }
+}
+
+// ========================================================
+// MODAL ZAMESTNANCA (MANAŽÉR)
+// ========================================================
+function openEmployeeModal() {
+  document.getElementById('employeeForm').reset();
+  document.getElementById('editEmpId').value = '';
+  document.getElementById('empModalTitle').textContent = '➕ Pridať zamestnanca';
+  document.getElementById('editEmpPin').value = Math.floor(1000 + Math.random() * 9000).toString();
+  document.getElementById('employeeModal').style.display = 'flex';
+}
+
+function openEditEmployeeModal(empId) {
+  const emp = state.employees.find(e => e.id === empId);
+  if (!emp) return;
+  document.getElementById('editEmpId').value = emp.id;
+  document.getElementById('editEmpName').value = emp.name;
+  document.getElementById('editEmpPin').value = emp.pin;
+  document.getElementById('editEmpRole').value = emp.role;
+  document.getElementById('editEmpLeave').value = emp.annual_leave_days;
+  document.getElementById('editEmpColor').value = emp.color || '#3b82f6';
+  document.getElementById('empModalTitle').textContent = '✏️ Upraviť zamestnanca';
+  document.getElementById('employeeModal').style.display = 'flex';
+}
+
+function closeEmployeeModal() {
+  document.getElementById('employeeModal').style.display = 'none';
+}
+
+async function handleEmployeeSubmit(e) {
+  e.preventDefault();
+  const id = document.getElementById('editEmpId').value;
+  const name = document.getElementById('editEmpName').value.trim();
+  const pin = document.getElementById('editEmpPin').value.trim();
+  const role = document.getElementById('editEmpRole').value;
+  const annual_leave_days = Number(document.getElementById('editEmpLeave').value);
+  const color = document.getElementById('editEmpColor').value;
+
+  const payload = { name, pin, role, annual_leave_days, color };
+  try {
+    const url = id ? `/api/employees/${id}` : '/api/employees';
+    const method = id ? 'PUT' : 'POST';
+    const res = await fetch(url, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) throw new Error('Chyba pri ukladaní zamestnanca');
+
+    closeEmployeeModal();
+    await loadEmployees();
+    renderEmployeesTable();
+    loadManagerData();
+  } catch (err) {
+    alert(err.message);
+  }
+}
+
+async function deleteEmployee(id) {
+  if (!confirm('Naozaj chcete deaktivovať tohto zamestnanca?')) return;
+  try {
+    const res = await fetch(`/api/employees/${id}`, { method: 'DELETE' });
+    if (res.ok) {
+      await loadEmployees();
+      renderEmployeesTable();
+      loadManagerData();
+    }
+  } catch (e) {
+    alert('Chyba pri mazaní zamestnanca');
+  }
+}
+
+// ========================================================
+// MODAL DETAIL DŇA
+// ========================================================
+function openDayDetail(dateStr) {
+  state.selectedDateForModal = dateStr;
+  const modal = document.getElementById('dayDetailModal');
+  const title = document.getElementById('dayDetailTitle');
+  const body = document.getElementById('dayDetailContent');
+
+  const holidaysMap = {};
+  state.holidays.forEach(h => { holidaysMap[h.date] = h.name; });
+  const holiday = holidaysMap[dateStr];
+
+  title.innerHTML = `📅 ${formatDate(dateStr)} ${holiday ? `<span class="badge-role" style="background:var(--bg-holiday);color:var(--color-holiday)">🎉 ${holiday}</span>` : ''}`;
+
+  const dayAbsences = state.absences.filter(a => dateStr >= a.start_date && dateStr <= a.end_date);
+  body.innerHTML = '';
+
+  if (dayAbsences.length === 0) {
+    body.innerHTML = '<p class="text-muted p-3 text-center">V tento deň nemajú zamestnanci nahlásenú žiadnu neprítomnosť.</p>';
+  } else {
+    dayAbsences.forEach(a => {
+      const item = document.createElement('div');
+      item.className = 'timeline-item mt-2';
+      const icon = ABSENCE_ICONS[a.type] || '📌';
+      const name = ABSENCE_NAMES[a.type] || a.type;
+      const subInfo = a.hours ? ` (${a.hours} hod.)` : (a.is_half_day ? ' (pol dňa)' : '');
+
+      item.innerHTML = `
+        <div class="timeline-left">
+          <span class="timeline-icon">${icon}</span>
+          <div>
+            <div class="timeline-dates"><strong>${a.employee_name || 'Zamestnanec'}</strong></div>
+            <div class="timeline-meta">${name}${subInfo} ${a.note ? `• <em>${a.note}</em>` : ''}</div>
+          </div>
+        </div>
+        <div>
+          <button class="btn btn-xs btn-outline" onclick="deleteAbsence(${a.id}); closeDayDetailModal();">🗑️</button>
+        </div>
+      `;
+      body.appendChild(item);
+    });
+  }
+
+  modal.style.display = 'flex';
+}
+
+function closeDayDetailModal() {
+  document.getElementById('dayDetailModal').style.display = 'none';
+}
+
+function openAbsenceForDate() {
+  closeDayDetailModal();
+  openAbsenceModal();
+  if (state.selectedDateForModal) {
+    document.getElementById('absenceStartDate').value = state.selectedDateForModal;
+    document.getElementById('absenceEndDate').value = state.selectedDateForModal;
+    calculateDaysLive();
+  }
+}
+
+// ========================================================
+// EXPORT DÁT DO EXCELU (CSV)
+// ========================================================
+function exportDataCsv() {
+  const year = state.currentYear;
+  window.open(`/api/export?year=${year}`, '_blank');
+}
+
+// --- POMOCNÉ FUNKCIE ---
+function formatDate(dStr) {
+  if (!dStr) return '';
+  const parts = dStr.split('-');
+  if (parts.length !== 3) return dStr;
+  return `${Number(parts[2])}. ${Number(parts[1])}. ${parts[0]}`;
+}

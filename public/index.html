@@ -1,0 +1,631 @@
+<!DOCTYPE html>
+<html lang="sk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>SP Asistent - Kalendár a Absencie</title>
+  
+  <!-- PWA & Mobile Meta -->
+  <meta name="description" content="Interný ročný kalendár a evidencia absencií, dovoleniek, PN a OČR pre zamestnancov a manažéra.">
+  <meta name="theme-color" content="#2563eb">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="SP Asistent">
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" type="image/svg+xml" href="/icons/icon.svg">
+  <link rel="apple-touch-icon" href="/icons/icon-192.png">
+
+  <!-- Google Fonts: Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <!-- HLAVIČKA APLIKÁCIE -->
+  <header class="app-header">
+    <div class="header-left">
+      <div class="app-logo">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+          <line x1="16" y1="2" x2="16" y2="6"></line>
+          <line x1="8" y1="2" x2="8" y2="6"></line>
+          <line x1="3" y1="10" x2="21" y2="10"></line>
+        </svg>
+      </div>
+      <div class="header-titles">
+        <h1 class="app-title">SP Asistent</h1>
+        <span id="userBadge" class="badge-role">Načítava sa...</span>
+      </div>
+    </div>
+
+    <div class="header-right">
+      <button id="pwaInstallBtn" class="btn btn-sm btn-outline btn-install" style="display: none;">
+        📲 Inštalovať do mobilu
+      </button>
+      <div id="userInfoContainer" class="user-info-dropdown">
+        <span id="userNameDisplay" class="user-name">Neprihlásený</span>
+        <button id="logoutBtn" class="btn btn-sm btn-ghost" title="Zmeniť používateľa / Odhlásiť">
+          🚪 Odhlásiť
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- HLAVNÝ OBSAH -->
+  <main class="main-container">
+    
+    <!-- 1. OBRAZOVKA PRIHLÁSENIA (LOGIN) -->
+    <section id="loginSection" class="view-section active">
+      <div class="login-card">
+        <div class="login-header">
+          <div class="login-logo">
+            <img src="/icons/icon.svg" alt="SP Asistent Logo" width="64" height="64">
+          </div>
+          <h2>Prihlásenie do SP Asistenta</h2>
+          <p class="text-muted">Vyberte si svoj profil pre zadanie absencie alebo správu tímu</p>
+        </div>
+
+        <div class="login-tabs">
+          <button id="tabEmployee" class="login-tab active" onclick="switchLoginTab('employee')">
+            👤 Zamestnanec
+          </button>
+          <button id="tabManager" class="login-tab" onclick="switchLoginTab('manager')">
+            👑 Správca / Manažér
+          </button>
+        </div>
+
+        <!-- Formulár Zamestnanec -->
+        <form id="employeeLoginForm" class="login-form">
+          <div class="form-group">
+            <label for="loginEmployeeSelect">Kto ste?</label>
+            <select id="loginEmployeeSelect" class="form-control" required>
+              <option value="">-- Vyberte svoje meno --</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label for="loginEmployeePin">Váš 4-miestny PIN</label>
+            <input type="password" id="loginEmployeePin" class="form-control pin-input" maxlength="8" placeholder="••••" inputmode="numeric" required>
+            <small class="form-hint">Predvolený PIN: 1111 (Ján), 2222 (Mária), 3333 (Peter)</small>
+          </div>
+
+          <div class="form-check">
+            <input type="checkbox" id="rememberMeEmployee" checked>
+            <label for="rememberMeEmployee">Zapamätať prihlásenie v tomto mobile</label>
+          </div>
+
+          <button type="submit" class="btn btn-primary btn-block btn-lg">
+            Vstúpiť do kalendára 👉
+          </button>
+        </form>
+
+        <!-- Formulár Manažér -->
+        <form id="managerLoginForm" class="login-form" style="display: none;">
+          <div class="form-group">
+            <label for="loginManagerPin">PIN kód správcu</label>
+            <input type="password" id="loginManagerPin" class="form-control pin-input" maxlength="8" placeholder="••••" inputmode="numeric" required>
+            <small class="form-hint">Predvolený PIN správcu: <strong>0000</strong></small>
+          </div>
+
+          <div class="form-check">
+            <input type="checkbox" id="rememberMeManager" checked>
+            <label for="rememberMeManager">Zapamätať prihlásenie správcu</label>
+          </div>
+
+          <button type="submit" class="btn btn-primary btn-block btn-lg">
+            Vstúpiť ako manažér 👑
+          </button>
+        </form>
+
+        <div id="loginError" class="alert alert-danger" style="display: none;"></div>
+      </div>
+    </section>
+
+    <!-- 2. ROZHRANIE ZAMESTNANCA (MOBILE-FIRST) -->
+    <section id="employeeViewSection" class="view-section" style="display: none;">
+      <div class="employee-welcome-banner">
+        <div class="welcome-text">
+          <h2>Ahoj, <span id="empGreetingName">Kolega</span>! 👋</h2>
+          <p class="text-muted">Tu môžete jednoducho zadať dovolenku, PN, OČR alebo lekára.</p>
+        </div>
+        <button class="btn btn-primary btn-lg pulse-btn" onclick="openAbsenceModal()">
+          ➕ Zadať neprítomnosť
+        </button>
+      </div>
+
+      <!-- KARTY ZOSTATKOV PRE ZAMESTNANCA -->
+      <div class="stats-grid">
+        <div class="stat-card vacation-card">
+          <div class="stat-icon">🏖️</div>
+          <div class="stat-content">
+            <div class="stat-label">Zostatok dovolenky</div>
+            <div class="stat-value"><span id="empRemainingVacation">0</span> <small>dní</small></div>
+            <div class="stat-sub">z nároku <span id="empTotalVacation">25</span> dní (<span id="empUsedVacation">0</span> vyčerpané)</div>
+          </div>
+        </div>
+
+        <div class="stat-card pn-card">
+          <div class="stat-icon">🤒</div>
+          <div class="stat-content">
+            <div class="stat-label">PN (Práceneschopnosť)</div>
+            <div class="stat-value"><span id="empPnDays">0</span> <small>dní</small></div>
+            <div class="stat-sub">tento rok</div>
+          </div>
+        </div>
+
+        <div class="stat-card ocr-card">
+          <div class="stat-icon">👶</div>
+          <div class="stat-content">
+            <div class="stat-label">OČR</div>
+            <div class="stat-value"><span id="empOcrDays">0</span> <small>dní</small></div>
+            <div class="stat-sub">tento rok</div>
+          </div>
+        </div>
+
+        <div class="stat-card doc-card">
+          <div class="stat-icon">🩺</div>
+          <div class="stat-content">
+            <div class="stat-label">Lekárske prehliadky</div>
+            <div class="stat-value"><span id="empDocDays">0</span> <small>dní</small></div>
+            <div class="stat-sub"><span id="empDocHours">0</span> hodín celkovo</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- OSOBNÝ KALENDÁR A PREHĽAD -->
+      <div class="section-row">
+        <div class="panel-box calendar-box">
+          <div class="panel-header">
+            <h3>📅 Môj kalendár</h3>
+            <div class="calendar-controls">
+              <button class="btn btn-sm btn-outline" onclick="changeEmpMonth(-1)">◀ Predchádzajúci</button>
+              <span id="empCurrentMonthLabel" class="current-month-label">November 2026</span>
+              <button class="btn btn-sm btn-outline" onclick="changeEmpMonth(1)">Nasledujúci ▶</button>
+            </div>
+          </div>
+          <div class="calendar-wrapper">
+            <div class="calendar-weekdays">
+              <span>Po</span><span>Ut</span><span>St</span><span>Št</span><span>Pi</span><span class="weekend">So</span><span class="weekend">Ne</span>
+            </div>
+            <div id="empMonthCalendarGrid" class="calendar-days-grid">
+              <!-- Dni sa vygenerujú cez JS -->
+            </div>
+          </div>
+          <div class="calendar-legend">
+            <span class="legend-item"><span class="legend-dot dot-dovolenka"></span> Dovolenka</span>
+            <span class="legend-item"><span class="legend-dot dot-pn"></span> PN</span>
+            <span class="legend-item"><span class="legend-dot dot-ocr"></span> OČR</span>
+            <span class="legend-item"><span class="legend-dot dot-lekar"></span> Lekár</span>
+            <span class="legend-item"><span class="legend-dot dot-nahradne"></span> Náhr. voľno</span>
+            <span class="legend-item"><span class="legend-dot dot-holiday"></span> Sviatok</span>
+          </div>
+        </div>
+
+        <div class="panel-box absences-list-box">
+          <div class="panel-header">
+            <h3>📋 Moje nahlásené neprítomnosti</h3>
+            <button class="btn btn-sm btn-primary" onclick="openAbsenceModal()">+ Pridať</button>
+          </div>
+          <div id="empAbsenceList" class="absence-timeline">
+            <!-- Vygeneruje sa dynamicky -->
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3. ROZHRANIE MANAŽÉRA (DESKTOP & MOBIL) -->
+    <section id="managerViewSection" class="view-section" style="display: none;">
+      <!-- Horný navigačný panel manažéra -->
+      <div class="manager-nav-tabs">
+        <button class="mgr-tab active" onclick="switchManagerTab('year')">
+          📅 Celoročný kalendár
+        </button>
+        <button class="mgr-tab" onclick="switchManagerTab('matrix')">
+          📊 Tímová matica
+        </button>
+        <button class="mgr-tab" onclick="switchManagerTab('list')">
+          📋 Všetky absencie
+        </button>
+        <button class="mgr-tab" onclick="switchManagerTab('stats')">
+          📈 Štatistiky & Zostatky
+        </button>
+        <button class="mgr-tab" onclick="switchManagerTab('employees')">
+          👥 Správa zamestnancov
+        </button>
+        <button class="mgr-tab" onclick="switchManagerTab('mobile-qr')">
+          📱 Mobilný prístup (QR)
+        </button>
+      </div>
+
+      <!-- Akčný riadok: výber roka a rýchle tlačidlá -->
+      <div class="action-bar">
+        <div class="action-bar-left">
+          <label for="mgrYearSelect" class="form-label">Rok:</label>
+          <select id="mgrYearSelect" class="form-control select-year" onchange="onManagerYearChange()">
+            <option value="2025">2025</option>
+            <option value="2026" selected>2026</option>
+            <option value="2027">2027</option>
+            <option value="2028">2028</option>
+          </select>
+
+          <label for="mgrEmployeeFilter" class="form-label ml-2">Zamestnanec:</label>
+          <select id="mgrEmployeeFilter" class="form-control select-emp" onchange="loadManagerData()">
+            <option value="">Všetci zamestnanci</option>
+          </select>
+        </div>
+
+        <div class="action-bar-right">
+          <button class="btn btn-primary" onclick="openAbsenceModalForManager()">
+            ➕ Zadať absenciu za zamestnanca
+          </button>
+          <button class="btn btn-outline" onclick="exportDataCsv()">
+            📥 Export do Excelu (CSV)
+          </button>
+        </div>
+      </div>
+
+      <!-- KARTY RÝCHLEHO PREHĽADU PRE MANAŽÉRA -->
+      <div id="managerSummaryCards" class="stats-grid mt-3">
+        <!-- Generované dynamicky -->
+      </div>
+
+      <!-- MANAŽÉRSKA ZÁLOŽKA 1: CELOROČNÝ KALENDÁR (12 MESIACOV) -->
+      <div id="mgrTabYear" class="mgr-tab-content active">
+        <div class="year-view-container">
+          <div class="year-header">
+            <h2>Celoročný kalendár na rok <span id="yearDisplayTitle">2026</span></h2>
+            <div class="calendar-legend">
+              <span class="legend-item"><span class="legend-dot dot-dovolenka"></span> Dovolenka</span>
+              <span class="legend-item"><span class="legend-dot dot-pn"></span> PN</span>
+              <span class="legend-item"><span class="legend-dot dot-ocr"></span> OČR</span>
+              <span class="legend-item"><span class="legend-dot dot-lekar"></span> Lekár</span>
+              <span class="legend-item"><span class="legend-dot dot-nahradne"></span> Náhradné voľno</span>
+              <span class="legend-item"><span class="legend-dot dot-holiday"></span> Sviatok</span>
+            </div>
+          </div>
+
+          <div id="yearMonthsGrid" class="year-months-grid">
+            <!-- 12 mesiacov vygenerovaných v JS -->
+          </div>
+        </div>
+      </div>
+
+      <!-- MANAŽÉRSKA ZÁLOŽKA 2: TÍMOVÁ MATICA -->
+      <div id="mgrTabMatrix" class="mgr-tab-content">
+        <div class="panel-box">
+          <div class="panel-header">
+            <h3>📊 Tímový maticový prehľad pre mesiac</h3>
+            <div class="matrix-month-picker">
+              <button class="btn btn-sm btn-outline" onclick="changeMatrixMonth(-1)">◀ Predchádzajúci</button>
+              <select id="matrixMonthSelect" class="form-control select-month" onchange="renderMatrixView()">
+                <option value="1">Január</option>
+                <option value="2">Február</option>
+                <option value="3">Marec</option>
+                <option value="4">Apríl</option>
+                <option value="5">Máj</option>
+                <option value="6">Jún</option>
+                <option value="7">Júl</option>
+                <option value="8">August</option>
+                <option value="9">September</option>
+                <option value="10">Október</option>
+                <option value="11" selected>November</option>
+                <option value="12">December</option>
+              </select>
+              <button class="btn btn-sm btn-outline" onclick="changeMatrixMonth(1)">Nasledujúci ▶</button>
+            </div>
+          </div>
+          <div class="matrix-table-container">
+            <table id="matrixTable" class="matrix-table">
+              <!-- Dynamická tabuľka -->
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- MANAŽÉRSKA ZÁLOŽKA 3: VŠETKY ABSENCIE A SCHVAĽOVANIE -->
+      <div id="mgrTabList" class="mgr-tab-content">
+        <div class="panel-box">
+          <div class="panel-header">
+            <h3>📋 Zoznam všetkých absencií</h3>
+            <div class="filter-group">
+              <select id="filterAbsenceType" class="form-control" onchange="renderAbsenceTable()">
+                <option value="">Všetky typy</option>
+                <option value="dovolenka">Dovolenka</option>
+                <option value="pn">PN</option>
+                <option value="ocr">OČR</option>
+                <option value="lekar">Lekár</option>
+                <option value="nahradne_volno">Náhradné voľno</option>
+                <option value="ine">Iné</option>
+              </select>
+            </div>
+          </div>
+          <div class="table-responsive">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Zamestnanec</th>
+                  <th>Typ</th>
+                  <th>Obdobie (Od - Do)</th>
+                  <th>Prac. dni / Hod.</th>
+                  <th>Poznámka</th>
+                  <th>Stav</th>
+                  <th>Akcie</th>
+                </tr>
+              </thead>
+              <tbody id="mgrAbsencesTableBody">
+                <!-- Dynamicky generované riadky -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- MANAŽÉRSKA ZÁLOŽKA 4: ŠTATISTIKY A ZOSTATKY -->
+      <div id="mgrTabStats" class="mgr-tab-content">
+        <div class="panel-box">
+          <div class="panel-header">
+            <h3>📈 Ročný prehľad čerpania a zostatkov (<span id="statsYearLabel">2026</span>)</h3>
+            <button class="btn btn-outline btn-sm" onclick="exportDataCsv()">📥 Stiahnuť Excel (CSV)</button>
+          </div>
+          <div class="table-responsive">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Zamestnanec</th>
+                  <th>Nárok na dovolenku</th>
+                  <th>Vyčerpaná dovolenka</th>
+                  <th>Zostatok dovolenky</th>
+                  <th>PN (dní)</th>
+                  <th>OČR (dní)</th>
+                  <th>Lekár (dní/hod)</th>
+                  <th>Náhr. voľno</th>
+                </tr>
+              </thead>
+              <tbody id="mgrStatsTableBody">
+                <!-- Dynamické štatistiky -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- MANAŽÉRSKA ZÁLOŽKA 5: SPRÁVA ZAMESTNANCOV -->
+      <div id="mgrTabEmployees" class="mgr-tab-content">
+        <div class="panel-box">
+          <div class="panel-header">
+            <h3>👥 Zoznam zamestnancov a ich prístupy</h3>
+            <button class="btn btn-primary btn-sm" onclick="openEmployeeModal()">➕ Pridať zamestnanca</button>
+          </div>
+          <div class="table-responsive">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Meno a priezvisko</th>
+                  <th>Rola</th>
+                  <th>PIN kód pre mobil</th>
+                  <th>Ročný nárok na dovolenku</th>
+                  <th>Farba</th>
+                  <th>Akcie</th>
+                </tr>
+              </thead>
+              <tbody id="mgrEmployeesTableBody">
+                <!-- Dynamicky generovaní zamestnanci -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- MANAŽÉRSKA ZÁLOŽKA 6: MOBILNÝ PRÍSTUP (QR) -->
+      <div id="mgrTabMobileQr" class="mgr-tab-content">
+        <div class="panel-box text-center p-4">
+          <h2>📱 Ako sa zamestnanci pripoja z mobilu</h2>
+          <p class="text-muted max-w-600 mx-auto">
+            Zamestnanec si jednoducho otvorí webovú adresu na mobile, alebo naskenuje QR kód,
+            a následne klikne na <strong>„Pridať na plochu“</strong> (alebo Inštalovať aplikáciu).
+          </p>
+
+          <div class="qr-card">
+            <div id="qrCodeContainer" class="qr-code-box">
+              <!-- QR Kód Canvas -->
+            </div>
+            <div class="qr-url-box mt-3">
+              <span class="text-muted">Adresa pre mobily v sieti Wi-Fi:</span>
+              <h3 id="mobileNetworkUrl" class="network-url">http://...</h3>
+              <button class="btn btn-sm btn-outline mt-2" onclick="copyMobileUrl()">📋 Kopírovať odkaz</button>
+            </div>
+          </div>
+
+          <div class="guide-steps">
+            <div class="step-item">
+              <span class="step-num">1</span>
+              <h4>Otvorte na mobile</h4>
+              <p>Pripojte mobil na rovnakú Wi-Fi a otvorte vyššie uvedenú adresu v Safari alebo Chrome.</p>
+            </div>
+            <div class="step-item">
+              <span class="step-num">2</span>
+              <h4>Pridajte na plochu</h4>
+              <p>V Safari: tlačidlo Zdieľať ⭡ → <em>„Pridať na plochu“</em>.<br>V Chrome: menu ⋮ → <em>„Inštalovať aplikáciu“</em>.</p>
+            </div>
+            <div class="step-item">
+              <span class="step-num">3</span>
+              <h4>Prihlásenie PINom</h4>
+              <p>Zamestnanec zvolí svoje meno a zadá 4-miestny PIN kód (ktorý vidíte v správe zamestnancov).</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </section>
+  </main>
+
+  <!-- MODAL: ZADANIE / ÚPRAVA ABSENCIE -->
+  <div id="absenceModal" class="modal-backdrop" style="display: none;">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 id="absenceModalTitle">➕ Zadať neprítomnosť do kalendára</h3>
+        <button class="modal-close-btn" onclick="closeAbsenceModal()">✕</button>
+      </div>
+      <form id="absenceForm" onsubmit="handleAbsenceSubmit(event)">
+        <input type="hidden" id="absenceId">
+
+        <div class="form-group" id="modalEmployeeSelectGroup">
+          <label for="absenceEmployee"><strong>Vyberte zamestnanca, pre ktorého zadávate absenciu *</strong></label>
+          <select id="absenceEmployee" class="form-control" required>
+            <!-- Dynamicky naplnené -->
+          </select>
+          <small class="form-hint" style="color:var(--primary);font-weight:600;">👑 Ako manažér zadávate neprítomnosť priamo bez nutnosti žiadosti zamestnanca.</small>
+        </div>
+
+        <div class="form-group">
+          <label>Typ neprítomnosti *</label>
+          <div class="type-selector-grid">
+            <label class="type-chip chip-dovolenka">
+              <input type="radio" name="absenceType" value="dovolenka" checked onchange="onAbsenceTypeChange()">
+              <span class="chip-content">🏖️ Dovolenka</span>
+            </label>
+            <label class="type-chip chip-pn">
+              <input type="radio" name="absenceType" value="pn" onchange="onAbsenceTypeChange()">
+              <span class="chip-content">🤒 PN</span>
+            </label>
+            <label class="type-chip chip-ocr">
+              <input type="radio" name="absenceType" value="ocr" onchange="onAbsenceTypeChange()">
+              <span class="chip-content">👶 OČR</span>
+            </label>
+            <label class="type-chip chip-lekar">
+              <input type="radio" name="absenceType" value="lekar" onchange="onAbsenceTypeChange()">
+              <span class="chip-content">🩺 Lekár (P)</span>
+            </label>
+            <label class="type-chip chip-nahradne">
+              <input type="radio" name="absenceType" value="nahradne_volno" onchange="onAbsenceTypeChange()">
+              <span class="chip-content">⏱️ Náhradné voľno</span>
+            </label>
+            <label class="type-chip chip-ine">
+              <input type="radio" name="absenceType" value="ine" onchange="onAbsenceTypeChange()">
+              <span class="chip-content">📁 Iné voľno</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Dátum od - do -->
+        <div class="form-row">
+          <div class="form-group col">
+            <label for="absenceStartDate">Dátum od *</label>
+            <input type="date" id="absenceStartDate" class="form-control" required onchange="onAbsenceDatesChange()">
+          </div>
+          <div class="form-group col">
+            <label for="absenceEndDate">Dátum do *</label>
+            <input type="date" id="absenceEndDate" class="form-control" required onchange="onAbsenceDatesChange()">
+          </div>
+        </div>
+
+        <!-- Rýchle tlačidlá dátumov -->
+        <div class="quick-date-buttons">
+          <button type="button" class="btn btn-xs btn-outline" onclick="setQuickDates('today')">Dnes</button>
+          <button type="button" class="btn btn-xs btn-outline" onclick="setQuickDates('tomorrow')">Zajtra</button>
+          <button type="button" class="btn btn-xs btn-outline" onclick="setQuickDates('this_week')">Tento týždeň</button>
+          <button type="button" class="btn btn-xs btn-outline" onclick="setQuickDates('next_week')">Budúci týždeň</button>
+        </div>
+
+        <!-- Špeciálne voľby: Pol dňa alebo hodiny -->
+        <div class="form-group" id="subDayOptions">
+          <div class="form-check">
+            <input type="checkbox" id="absenceHalfDay" onchange="onSubDayChange()">
+            <label for="absenceHalfDay">Pol dňa (0,5 dňa)</label>
+          </div>
+          <div id="hoursInputGroup" class="form-group mt-2" style="display: none;">
+            <label for="absenceHours">Počet hodín (pre lekára / priepustku):</label>
+            <input type="number" id="absenceHours" class="form-control" min="0.5" max="8" step="0.5" placeholder="napr. 4" onchange="onSubDayChange()">
+          </div>
+        </div>
+
+        <!-- Výpočet počtu pracovných dní -->
+        <div class="days-summary-badge">
+          ⏳ Započítaných pracovných dní: <strong id="calculatedWorkingDays">1.0</strong>
+          <small class="text-muted d-block">(víkendy a slovenské sviatky sa nezapočítavajú)</small>
+        </div>
+
+        <div class="form-group mt-3">
+          <label for="absenceNote">Poznámka (nepovinné)</label>
+          <input type="text" id="absenceNote" class="form-control" placeholder="napr. ranná kontrola, zubár, rodinné dôvody...">
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" onclick="closeAbsenceModal()">Zrušiť</button>
+          <button type="submit" class="btn btn-primary btn-lg">Uložiť do kalendára 💾</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: PRIDANIE / ÚPRAVA ZAMESTNANCA -->
+  <div id="employeeModal" class="modal-backdrop" style="display: none;">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 id="empModalTitle">➕ Pridať zamestnanca</h3>
+        <button class="modal-close-btn" onclick="closeEmployeeModal()">✕</button>
+      </div>
+      <form id="employeeForm" onsubmit="handleEmployeeSubmit(event)">
+        <input type="hidden" id="editEmpId">
+
+        <div class="form-group">
+          <label for="editEmpName">Meno a priezvisko *</label>
+          <input type="text" id="editEmpName" class="form-control" placeholder="napr. Jozef Kováč" required>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group col">
+            <label for="editEmpPin">PIN kód pre mobil (4 čísla) *</label>
+            <input type="text" id="editEmpPin" class="form-control" maxlength="8" placeholder="1234" required>
+          </div>
+          <div class="form-group col">
+            <label for="editEmpRole">Rola</label>
+            <select id="editEmpRole" class="form-control">
+              <option value="employee">Zamestnanec</option>
+              <option value="admin">Manažér / Správca</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group col">
+            <label for="editEmpLeave">Ročný nárok na dovolenku (dní)</label>
+            <input type="number" id="editEmpLeave" class="form-control" value="25" min="0" max="60">
+          </div>
+          <div class="form-group col">
+            <label for="editEmpColor">Rozlišovacia farba</label>
+            <input type="color" id="editEmpColor" class="form-control color-picker" value="#3b82f6">
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" onclick="closeEmployeeModal()">Zrušiť</button>
+          <button type="submit" class="btn btn-primary">Uložiť zamestnanca 💾</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: DETAIL DŇA V KALENDÁRI -->
+  <div id="dayDetailModal" class="modal-backdrop" style="display: none;">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 id="dayDetailTitle">Dátum: ...</h3>
+        <button class="modal-close-btn" onclick="closeDayDetailModal()">✕</button>
+      </div>
+      <div id="dayDetailContent" class="day-detail-body">
+        <!-- Zoznam neprítomností v daný deň -->
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-primary" onclick="openAbsenceForDate()">+ Pridať absenciu na tento deň</button>
+        <button class="btn btn-outline" onclick="closeDayDetailModal()">Zavrieť</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Knižnice a Hlavný skript -->
+  <script src="/app.js"></script>
+</body>
+</html>

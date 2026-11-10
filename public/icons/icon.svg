@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3b82f6"/>
+      <stop offset="100%" stop-color="#1d4ed8"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#10b981"/>
+      <stop offset="100%" stop-color="#059669"/>
+    </linearGradient>
+  </defs>
+  <!-- Background with rounded corners -->
+  <rect width="512" height="512" rx="128" fill="#0f172a"/>
+  <!-- Calendar Body -->
+  <rect x="80" y="110" width="352" height="320" rx="32" fill="url(#grad)"/>
+  <!-- Top Bar -->
+  <path d="M80 142 A32 32 0 0 1 112 110 L400 110 A32 32 0 0 1 432 142 L432 180 L80 180 Z" fill="#1e40af"/>
+  <!-- Spiral Binders -->
+  <rect x="140" y="70" width="24" height="60" rx="12" fill="#e2e8f0"/>
+  <rect x="348" y="70" width="24" height="60" rx="12" fill="#e2e8f0"/>
+  <!-- Calendar Grid Dots -->
+  <circle cx="150" cy="240" r="14" fill="#93c5fd" opacity="0.8"/>
+  <circle cx="210" cy="240" r="14" fill="#93c5fd" opacity="0.8"/>
+  <circle cx="270" cy="240" r="14" fill="#93c5fd" opacity="0.8"/>
+  <circle cx="330" cy="240" r="14" fill="#93c5fd" opacity="0.8"/>
+  
+  <circle cx="150" cy="300" r="14" fill="#93c5fd" opacity="0.8"/>
+  <circle cx="210" cy="300" r="14" fill="#93c5fd" opacity="0.8"/>
+  <circle cx="270" cy="300" r="14" fill="#93c5fd" opacity="0.8"/>
+  <circle cx="330" cy="300" r="14" fill="#93c5fd" opacity="0.8"/>
+
+  <circle cx="150" cy="360" r="14" fill="#93c5fd" opacity="0.8"/>
+  <circle cx="210" cy="360" r="14" fill="#93c5fd" opacity="0.8"/>
+  
+  <!-- Checkmark Badge -->
+  <circle cx="360" cy="360" r="64" fill="url(#accent)" stroke="#0f172a" stroke-width="12"/>
+  <path d="M335 360 L352 378 L388 340" fill="none" stroke="#ffffff" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

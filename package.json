@@ -1,0 +1,15 @@
+{
+  "name": "sp-asistent",
+  "version": "1.0.0",
+  "description": "Interný celoročný kalendár a evidencia absencií zamestnancov",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "keywords": ["calendar", "attendance", "absences", "pwa"],
+  "author": "",
+  "license": "ISC",
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}
