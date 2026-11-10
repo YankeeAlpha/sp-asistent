@@ -618,7 +618,7 @@ const server = http.createServer(async (req, res) => {
   // 13. Zmena PINu / hesla (pre zamestnanca aj manažéra)
   if (pathname === '/api/change-pin' && method === 'POST') {
     try {
-      const { employeeId, oldPin, newPin, isAdminChange } = await parseJsonBody(req);
+      const { employeeId, oldPin, newPin } = await parseJsonBody(req);
       if (!employeeId || !newPin || !newPin.trim()) {
         return sendJson(res, 400, { error: 'Vyplňte nové heslo / PIN.' });
       }
@@ -628,8 +628,11 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 404, { error: 'Používateľ nebol nájdený.' });
       }
 
-      // Ak to nie je manažérska priama zmena, vyžadujeme overenie starého PINu
-      if (!isAdminChange) {
+      // Overenie, či požiadavku robí administrátor
+      const isAdmin = isAdminRequest(req, parsedUrl);
+
+      // Ak požiadavka NIE JE od overeného administrátora, vyžadujeme kontrolu starého hesla
+      if (!isAdmin) {
         if (!oldPin || emp.pin !== oldPin.trim()) {
           return sendJson(res, 400, { error: 'Pôvodné heslo / PIN nie je správne.' });
         }
