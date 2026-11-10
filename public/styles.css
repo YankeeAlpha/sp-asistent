@@ -821,6 +821,14 @@ body {
   font-weight: 700;
 }
 
+.matrix-table tr.current-user-row td.emp-name-col {
+  background: #eff6ff;
+  border-left: 4px solid var(--primary);
+}
+.matrix-table tr.current-user-row td {
+  background-color: rgba(37, 99, 235, 0.03);
+}
+
 .matrix-cell-absence {
   border-radius: 4px;
   font-weight: 700;
@@ -828,7 +836,28 @@ body {
   padding: 3px 2px;
   color: #fff;
   cursor: pointer;
+  transition: transform 0.1s ease;
 }
+.matrix-cell-absence:hover {
+  transform: scale(1.05);
+}
+
+/* Po schválení: výrazná zelená farba */
+.matrix-cell-absence.cell-approved {
+  background-color: #10b981 !important;
+  color: #ffffff !important;
+  box-shadow: 0 1px 4px rgba(16, 185, 129, 0.4);
+  border: 1px solid #059669;
+}
+
+/* Kým čaká na schválenie administrátorom: oranžová s prerušovaným okrajom */
+.matrix-cell-absence.cell-pending {
+  background-color: #f59e0b !important;
+  color: #ffffff !important;
+  border: 1px dashed #ffffff;
+  opacity: 0.95;
+}
+
 .cell-dovolenka { background-color: var(--color-dovolenka); }
 .cell-pn { background-color: var(--color-pn); }
 .cell-ocr { background-color: var(--color-ocr); }

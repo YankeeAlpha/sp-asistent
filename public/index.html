@@ -20,7 +20,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
   
-  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/styles.css?v=2.5">
 </head>
 <body>
   <!-- HLAVIČKA APLIKÁCIE -->
@@ -143,81 +143,131 @@
         </div>
       </div>
 
-      <!-- KARTY ZOSTATKOV PRE ZAMESTNANCA -->
-      <div class="stats-grid">
-        <div class="stat-card vacation-card">
-          <div class="stat-icon">🏖️</div>
-          <div class="stat-content">
-            <div class="stat-label">Zostatok dovolenky</div>
-            <div class="stat-value"><span id="empRemainingVacation">0</span> <small>dní</small></div>
-            <div class="stat-sub">z nároku <span id="empTotalVacation">25</span> dní (<span id="empUsedVacation">0</span> vyčerpané)</div>
+      <!-- ZÁLOŽKY PRE ZAMESTNANCA -->
+      <div class="manager-nav-tabs" style="margin-bottom: 20px;">
+        <button id="empTabBtnOverview" class="mgr-tab active" onclick="switchEmpTab('overview')">
+          👤 Môj osobný prehľad a zostatky
+        </button>
+        <button id="empTabBtnMatrix" class="mgr-tab" onclick="switchEmpTab('matrix')">
+          📊 Tímová matica (Prehľad kolegov v práci)
+        </button>
+      </div>
+
+      <!-- ZÁLOŽKA 1: OSOBNÝ PREHĽAD ZAMESTNANCA -->
+      <div id="empTabOverviewContent" class="emp-tab-content">
+        <!-- KARTY ZOSTATKOV PRE ZAMESTNANCA -->
+        <div class="stats-grid">
+          <div class="stat-card vacation-card">
+            <div class="stat-icon">🏖️</div>
+            <div class="stat-content">
+              <div class="stat-label">Zostatok dovolenky</div>
+              <div class="stat-value"><span id="empRemainingVacation">0</span> <small>dní</small></div>
+              <div class="stat-sub">z nároku <span id="empTotalVacation">25</span> dní (<span id="empUsedVacation">0</span> vyčerpané)</div>
+            </div>
+          </div>
+
+          <div class="stat-card pn-card">
+            <div class="stat-icon">🤒</div>
+            <div class="stat-content">
+              <div class="stat-label">PN (Práceneschopnosť)</div>
+              <div class="stat-value"><span id="empPnDays">0</span> <small>dní</small></div>
+              <div class="stat-sub">tento rok</div>
+            </div>
+          </div>
+
+          <div class="stat-card ocr-card">
+            <div class="stat-icon">👶</div>
+            <div class="stat-content">
+              <div class="stat-label">OČR</div>
+              <div class="stat-value"><span id="empOcrDays">0</span> <small>dní</small></div>
+              <div class="stat-sub">tento rok</div>
+            </div>
+          </div>
+
+          <div class="stat-card doc-card">
+            <div class="stat-icon">🩺</div>
+            <div class="stat-content">
+              <div class="stat-label">Lekárske prehliadky</div>
+              <div class="stat-value"><span id="empDocDays">0</span> <small>dní</small></div>
+              <div class="stat-sub"><span id="empDocHours">0</span> hodín celkovo</div>
+            </div>
           </div>
         </div>
 
-        <div class="stat-card pn-card">
-          <div class="stat-icon">🤒</div>
-          <div class="stat-content">
-            <div class="stat-label">PN (Práceneschopnosť)</div>
-            <div class="stat-value"><span id="empPnDays">0</span> <small>dní</small></div>
-            <div class="stat-sub">tento rok</div>
+        <!-- OSOBNÝ KALENDÁR A PREHĽAD -->
+        <div class="section-row">
+          <div class="panel-box calendar-box">
+            <div class="panel-header">
+              <h3>📅 Môj kalendár</h3>
+              <div class="calendar-controls">
+                <button class="btn btn-sm btn-outline" onclick="changeEmpMonth(-1)">◀ Predchádzajúci</button>
+                <span id="empCurrentMonthLabel" class="current-month-label">November 2026</span>
+                <button class="btn btn-sm btn-outline" onclick="changeEmpMonth(1)">Nasledujúci ▶</button>
+              </div>
+            </div>
+            <div class="calendar-wrapper">
+              <div class="calendar-weekdays">
+                <span>Po</span><span>Ut</span><span>St</span><span>Št</span><span>Pi</span><span class="weekend">So</span><span class="weekend">Ne</span>
+              </div>
+              <div id="empMonthCalendarGrid" class="calendar-days-grid">
+                <!-- Dni sa vygenerujú cez JS -->
+              </div>
+            </div>
+            <div class="calendar-legend">
+              <span class="legend-item"><span class="legend-dot dot-dovolenka"></span> Dovolenka</span>
+              <span class="legend-item"><span class="legend-dot dot-pn"></span> PN</span>
+              <span class="legend-item"><span class="legend-dot dot-ocr"></span> OČR</span>
+              <span class="legend-item"><span class="legend-dot dot-lekar"></span> Lekár</span>
+              <span class="legend-item"><span class="legend-dot dot-nahradne"></span> Náhr. voľno</span>
+              <span class="legend-item"><span class="legend-dot dot-holiday"></span> Sviatok</span>
+            </div>
           </div>
-        </div>
 
-        <div class="stat-card ocr-card">
-          <div class="stat-icon">👶</div>
-          <div class="stat-content">
-            <div class="stat-label">OČR</div>
-            <div class="stat-value"><span id="empOcrDays">0</span> <small>dní</small></div>
-            <div class="stat-sub">tento rok</div>
-          </div>
-        </div>
-
-        <div class="stat-card doc-card">
-          <div class="stat-icon">🩺</div>
-          <div class="stat-content">
-            <div class="stat-label">Lekárske prehliadky</div>
-            <div class="stat-value"><span id="empDocDays">0</span> <small>dní</small></div>
-            <div class="stat-sub"><span id="empDocHours">0</span> hodín celkovo</div>
+          <div class="panel-box absences-list-box">
+            <div class="panel-header">
+              <h3>📋 Moje nahlásené neprítomnosti</h3>
+              <button class="btn btn-sm btn-primary" onclick="openAbsenceModal()">+ Pridať</button>
+            </div>
+            <div id="empAbsenceList" class="absence-timeline">
+              <!-- Vygeneruje sa dynamicky -->
+            </div>
           </div>
         </div>
       </div>
 
-      <!-- OSOBNÝ KALENDÁR A PREHĽAD -->
-      <div class="section-row">
-        <div class="panel-box calendar-box">
+      <!-- ZÁLOŽKA 2: TÍMOVÁ MATICA PRE ZAMESTNANCA -->
+      <div id="empTabMatrixContent" class="emp-tab-content" style="display: none;">
+        <div class="panel-box">
           <div class="panel-header">
-            <h3>📅 Môj kalendár</h3>
-            <div class="calendar-controls">
-              <button class="btn btn-sm btn-outline" onclick="changeEmpMonth(-1)">◀ Predchádzajúci</button>
-              <span id="empCurrentMonthLabel" class="current-month-label">November 2026</span>
-              <button class="btn btn-sm btn-outline" onclick="changeEmpMonth(1)">Nasledujúci ▶</button>
+            <h3>📊 Tímová matica – Kto je kedy v práci</h3>
+            <div class="matrix-month-picker">
+              <button class="btn btn-sm btn-outline" onclick="changeEmpMatrixMonth(-1)">◀ Predchádzajúci</button>
+              <select id="empMatrixMonthSelect" class="form-control select-month" onchange="renderEmpMatrixView()">
+                <option value="1">Január</option>
+                <option value="2">Február</option>
+                <option value="3">Marec</option>
+                <option value="4">Apríl</option>
+                <option value="5">Máj</option>
+                <option value="6">Jún</option>
+                <option value="7">Júl</option>
+                <option value="8">August</option>
+                <option value="9">September</option>
+                <option value="10">Október</option>
+                <option value="11" selected>November</option>
+                <option value="12">December</option>
+              </select>
+              <button class="btn btn-sm btn-outline" onclick="changeEmpMatrixMonth(1)">Nasledujúci ▶</button>
             </div>
           </div>
-          <div class="calendar-wrapper">
-            <div class="calendar-weekdays">
-              <span>Po</span><span>Ut</span><span>St</span><span>Št</span><span>Pi</span><span class="weekend">So</span><span class="weekend">Ne</span>
-            </div>
-            <div id="empMonthCalendarGrid" class="calendar-days-grid">
-              <!-- Dni sa vygenerujú cez JS -->
-            </div>
-          </div>
-          <div class="calendar-legend">
-            <span class="legend-item"><span class="legend-dot dot-dovolenka"></span> Dovolenka</span>
-            <span class="legend-item"><span class="legend-dot dot-pn"></span> PN</span>
-            <span class="legend-item"><span class="legend-dot dot-ocr"></span> OČR</span>
-            <span class="legend-item"><span class="legend-dot dot-lekar"></span> Lekár</span>
-            <span class="legend-item"><span class="legend-dot dot-nahradne"></span> Náhr. voľno</span>
+          <div class="calendar-legend" style="margin-bottom: 14px;">
+            <span class="legend-item"><span class="legend-dot" style="background:#10b981;"></span> <strong style="color:#059669;">Zelená = Odsúhlasené / Schválené ✓</strong></span>
+            <span class="legend-item"><span class="legend-dot" style="background:#f59e0b;"></span> <strong style="color:#d97706;">Oranžová = Čaká na schválenie ⏳</strong></span>
             <span class="legend-item"><span class="legend-dot dot-holiday"></span> Sviatok</span>
           </div>
-        </div>
-
-        <div class="panel-box absences-list-box">
-          <div class="panel-header">
-            <h3>📋 Moje nahlásené neprítomnosti</h3>
-            <button class="btn btn-sm btn-primary" onclick="openAbsenceModal()">+ Pridať</button>
-          </div>
-          <div id="empAbsenceList" class="absence-timeline">
-            <!-- Vygeneruje sa dynamicky -->
+          <div class="matrix-table-container">
+            <table id="empMatrixTable" class="matrix-table">
+              <!-- Dynamická tímová matica pre zamestnancov -->
+            </table>
           </div>
         </div>
       </div>
@@ -323,6 +373,11 @@
               </select>
               <button class="btn btn-sm btn-outline" onclick="changeMatrixMonth(1)">Nasledujúci ▶</button>
             </div>
+          </div>
+          <div class="calendar-legend" style="margin-bottom: 14px;">
+            <span class="legend-item"><span class="legend-dot" style="background:#10b981;"></span> <strong style="color:#059669;">Zelená = Odsúhlasené / Schválené ✓</strong></span>
+            <span class="legend-item"><span class="legend-dot" style="background:#f59e0b;"></span> <strong style="color:#d97706;">Oranžová = Čaká na schválenie ⏳</strong></span>
+            <span class="legend-item"><span class="legend-dot dot-holiday"></span> Sviatok</span>
           </div>
           <div class="matrix-table-container">
             <table id="matrixTable" class="matrix-table">
@@ -681,6 +736,6 @@
   </div>
 
   <!-- Knižnice a Hlavný skript s cache-buster verziou -->
-  <script src="/app.js?v=2.2"></script>
+  <script src="/app.js?v=2.5"></script>
 </body>
 </html>

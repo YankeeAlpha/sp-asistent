@@ -353,11 +353,13 @@ async function loadEmployeeData() {
   await fetchEmployeeAbsences();
   renderEmployeeCalendar();
   updateEmployeeStats();
+  renderEmpMatrixView();
 }
 
 async function fetchEmployeeAbsences() {
   try {
-    const res = await fetch(`/api/absences?employee_id=${state.currentUser.id}&year=${state.currentYear}`);
+    // Načítame absencie pre celý tím, aby zamestnanci videli aj prítomnosť kolegov v matici
+    const res = await fetch(`/api/absences?year=${state.currentYear}`);
     if (res.ok) {
       state.absences = await res.json();
       renderEmployeeAbsenceList();
@@ -375,7 +377,8 @@ function updateEmployeeStats() {
   let docDays = 0;
   let docHours = 0;
 
-  state.absences.forEach(a => {
+  // Štatistiky počítame iba pre prihláseného zamestnanca
+  state.absences.filter(a => a.employee_id === user.id).forEach(a => {
     if (a.status === 'rejected') return;
     const days = a.working_days || 0;
     if (a.type === 'dovolenka') usedVacation += days;
@@ -448,8 +451,8 @@ function renderEmployeeCalendar() {
 
     cell.innerHTML = `<span class="day-num">${day}</span>`;
 
-    // Nájdenie absencií pre daný deň
-    const dayAbsences = state.absences.filter(a => dayStr >= a.start_date && dayStr <= a.end_date);
+    // Nájdenie absencií prihláseného zamestnanca pre daný deň
+    const dayAbsences = state.absences.filter(a => a.employee_id === state.currentUser.id && dayStr >= a.start_date && dayStr <= a.end_date);
     if (dayAbsences.length > 0) {
       cell.classList.add('has-absence');
       const dotsDiv = document.createElement('div');
@@ -477,12 +480,13 @@ function renderEmployeeAbsenceList() {
   const container = document.getElementById('empAbsenceList');
   container.innerHTML = '';
 
-  if (state.absences.length === 0) {
+  const myAbsences = state.absences.filter(a => a.employee_id === state.currentUser.id);
+  if (myAbsences.length === 0) {
     container.innerHTML = '<p class="text-muted text-center p-3">Zatiaľ nemáte nahlásené žiadne neprítomnosti.</p>';
     return;
   }
 
-  state.absences.forEach(a => {
+  myAbsences.forEach(a => {
     const item = document.createElement('div');
     item.className = 'timeline-item';
 
@@ -490,12 +494,19 @@ function renderEmployeeAbsenceList() {
     const name = ABSENCE_NAMES[a.type] || a.type;
     const workingDays = a.working_days ? `${a.working_days} prac. dní` : '';
     const hours = a.hours ? ` (${a.hours} hod.)` : (a.is_half_day ? ' (pol dňa)' : '');
+    const isApproved = (a.status === 'approved');
+    const isPending = (a.status === 'pending');
+    const statusBadge = isApproved
+      ? '<span class="badge-role" style="background:#d1fae5;color:#059669;font-weight:700;margin-left:6px;">✅ Schválené</span>'
+      : (isPending 
+          ? '<span class="badge-role" style="background:#fef3c7;color:#d97706;font-weight:700;margin-left:6px;">⏳ Čaká na schválenie</span>' 
+          : '<span class="badge-role" style="background:#fee2e2;color:#dc2626;font-weight:700;margin-left:6px;">❌ Zamietnuté</span>');
 
     item.innerHTML = `
       <div class="timeline-left">
         <span class="timeline-icon">${icon}</span>
         <div>
-          <div class="timeline-dates">${formatDate(a.start_date)} - ${formatDate(a.end_date)}</div>
+          <div class="timeline-dates">${formatDate(a.start_date)} - ${formatDate(a.end_date)} ${statusBadge}</div>
           <div class="timeline-meta"><strong>${name}</strong> • ${workingDays}${hours} ${a.note ? `• <em>${a.note}</em>` : ''}</div>
         </div>
       </div>
@@ -505,6 +516,43 @@ function renderEmployeeAbsenceList() {
     `;
     container.appendChild(item);
   });
+}
+
+// Prepínanie záložiek pre zamestnanca
+function switchEmpTab(tabKey) {
+  const btnOverview = document.getElementById('empTabBtnOverview');
+  const btnMatrix = document.getElementById('empTabBtnMatrix');
+  const contentOverview = document.getElementById('empTabOverviewContent');
+  const contentMatrix = document.getElementById('empTabMatrixContent');
+
+  if (tabKey === 'overview') {
+    btnOverview.classList.add('active');
+    btnMatrix.classList.remove('active');
+    contentOverview.style.display = 'block';
+    contentMatrix.style.display = 'none';
+  } else {
+    btnMatrix.classList.add('active');
+    btnOverview.classList.remove('active');
+    contentOverview.style.display = 'none';
+    contentMatrix.style.display = 'block';
+    renderEmpMatrixView();
+  }
+}
+
+function renderEmpMatrixView() {
+  const sel = document.getElementById('empMatrixMonthSelect');
+  if (!sel) return;
+  const month = Number(sel.value);
+  renderMatrixToTable(document.getElementById('empMatrixTable'), month, true);
+}
+
+function changeEmpMatrixMonth(delta) {
+  const sel = document.getElementById('empMatrixMonthSelect');
+  let val = Number(sel.value) + delta;
+  if (val < 1) val = 12;
+  if (val > 12) val = 1;
+  sel.value = val;
+  renderEmpMatrixView();
 }
 
 // ========================================================
@@ -736,12 +784,11 @@ function renderYearCalendar() {
   }
 }
 
-// --- 2. TÍMOVÁ MATICA ---
-function renderMatrixView() {
-  const table = document.getElementById('matrixTable');
+// --- 2. TÍMOVÁ MATICA (SPOLOČNÁ IMPLEMENTÁCIA PRE MANAŽÉRA AJ ZAMESTNANCOV) ---
+function renderMatrixToTable(table, month, isEmployee) {
+  if (!table) return;
   table.innerHTML = '';
 
-  const month = Number(document.getElementById('matrixMonthSelect').value);
   const year = state.currentYear;
   const daysInMonth = new Date(year, month, 0).getDate();
 
@@ -781,9 +828,14 @@ function renderMatrixView() {
   const tbody = document.createElement('tbody');
   state.employees.forEach(emp => {
     const tr = document.createElement('tr');
+    const isMe = (state.currentUser && state.currentUser.id === emp.id);
+    if (isMe) {
+      tr.className = 'current-user-row';
+    }
+
     const tdName = document.createElement('td');
     tdName.className = 'emp-name-col';
-    tdName.innerHTML = `<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${emp.color};margin-right:6px"></span><strong>${emp.name}</strong>`;
+    tdName.innerHTML = `<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${emp.color};margin-right:6px"></span><strong>${emp.name}</strong> ${isMe ? '<small style="color:var(--primary);font-weight:700;">(Vy)</small>' : ''}`;
     tr.appendChild(tdName);
 
     for (let day = 1; day <= daysInMonth; day++) {
@@ -796,8 +848,8 @@ function renderMatrixView() {
       if (isWeekend) td.classList.add('weekend-col');
       if (isHoliday) td.classList.add('holiday-col');
 
-      // Absencia pre tohto zamestnanca
-      const abs = state.absences.find(a => a.employee_id === emp.id && dateStr >= a.start_date && dateStr <= a.end_date);
+      // Absencia pre tohto zamestnanca (okrem zamietnutých)
+      const abs = state.absences.find(a => a.employee_id === emp.id && dateStr >= a.start_date && dateStr <= a.end_date && a.status !== 'rejected');
       if (abs) {
         const shortLabels = {
           'dovolenka': 'D',
@@ -807,15 +859,22 @@ function renderMatrixView() {
           'nahradne_volno': 'NV',
           'ine': 'I'
         };
+        const isApproved = (abs.status === 'approved');
         const badge = document.createElement('div');
-        badge.className = `matrix-cell-absence cell-${abs.type}`;
-        badge.textContent = shortLabels[abs.type] || 'A';
-        badge.title = `${emp.name}: ${ABSENCE_NAMES[abs.type]} (${abs.note || ''})`;
+        // Po schválení sa zobrazí výraznou ZELENOU farbou (.cell-approved), kým čaká na schválenie tak oranžovo (.cell-pending)
+        badge.className = `matrix-cell-absence ${isApproved ? 'cell-approved' : 'cell-pending'}`;
+        const label = shortLabels[abs.type] || 'A';
+        badge.innerHTML = isApproved ? `${label} ✓` : `${label} ⏳`;
+        badge.title = `${emp.name}: ${ABSENCE_NAMES[abs.type]} [${isApproved ? 'ODSÚHLASENÉ (Schválené) ✓' : 'ČAKÁ NA SCHVÁLENIE ⏳'}] (${abs.note || ''})`;
         badge.addEventListener('click', () => openDayDetail(dateStr));
         td.appendChild(badge);
       } else {
         td.addEventListener('click', () => {
-          openAbsenceModalWithPrefill(emp.id, dateStr);
+          if (!isEmployee || isMe) {
+            openAbsenceModalWithPrefill(emp.id, dateStr);
+          } else {
+            alert(`${emp.name} je v tento deň (${formatDate(dateStr)}) v práci.`);
+          }
         });
       }
       tr.appendChild(td);
@@ -823,6 +882,13 @@ function renderMatrixView() {
     tbody.appendChild(tr);
   });
   table.appendChild(tbody);
+}
+
+function renderMatrixView() {
+  const sel = document.getElementById('matrixMonthSelect');
+  if (!sel) return;
+  const month = Number(sel.value);
+  renderMatrixToTable(document.getElementById('matrixTable'), month, false);
 }
 
 function changeMatrixMonth(delta) {
@@ -857,16 +923,30 @@ function renderAbsenceTable() {
     const workingDays = a.working_days ? `${a.working_days.toFixed(1)} prac. dní` : '0';
     const subInfo = a.hours ? ` (${a.hours} hod.)` : (a.is_half_day ? ' (pol dňa)' : '');
 
+    const isPending = (a.status === 'pending');
+    const isApproved = (a.status === 'approved');
+    const statusBadge = isApproved 
+      ? '<span class="badge-role" style="background:#d1fae5;color:#059669;font-weight:700;">✅ Schválené</span>'
+      : (isPending 
+          ? '<span class="badge-role" style="background:#fef3c7;color:#d97706;font-weight:700;">⏳ Čaká na schválenie</span>' 
+          : '<span class="badge-role" style="background:#fee2e2;color:#dc2626;font-weight:700;">❌ Zamietnuté</span>');
+
+    const actions = isPending ? `
+      <button class="btn btn-xs btn-primary" style="background:#10b981;border-color:#10b981;" onclick="approveAbsence(${a.id})" title="Schváliť túto požiadavku">✅ Schváliť</button>
+      <button class="btn btn-xs btn-outline ml-1" style="color:#dc2626;" onclick="rejectAbsence(${a.id})" title="Zamietnuť požiadavku">❌ Zamietnuť</button>
+      <button class="btn btn-xs btn-outline ml-1" onclick="deleteAbsence(${a.id})" title="Zmazať">🗑️</button>
+    ` : `
+      <button class="btn btn-xs btn-outline" onclick="deleteAbsence(${a.id})" title="Zmazať absenciu">🗑️ Zmazať</button>
+    `;
+
     tr.innerHTML = `
       <td><strong>${a.employee_name || 'Neznámy'}</strong></td>
       <td><span class="legend-dot dot-${a.type}"></span> ${icon} ${name}</td>
       <td>${formatDate(a.start_date)} - ${formatDate(a.end_date)}</td>
       <td>${workingDays}${subInfo}</td>
       <td>${a.note || '-'}</td>
-      <td><span class="badge-role" style="background:#e0f2fe;color:#0284c7">${a.status || 'schválené'}</span></td>
-      <td>
-        <button class="btn btn-xs btn-outline" onclick="deleteAbsence(${a.id})" title="Zmazať absenciu">🗑️ Zmazať</button>
-      </td>
+      <td>${statusBadge}</td>
+      <td>${actions}</td>
     `;
     tbody.appendChild(tr);
   });
@@ -1163,6 +1243,10 @@ async function handleAbsenceSubmit(e) {
   const hours = Number(document.getElementById('absenceHours').value) || 0;
   const note = document.getElementById('absenceNote').value.trim();
 
+  // Ak pridáva manažér, absencia je priamo schválená ('approved').
+  // Ak pridáva zamestnanec, absencia čaká na schválenie administrátorom ('pending').
+  const initialStatus = (state.currentUser && state.currentUser.role === 'admin') ? 'approved' : 'pending';
+
   const payload = {
     employee_id: employeeId,
     type,
@@ -1171,7 +1255,7 @@ async function handleAbsenceSubmit(e) {
     is_half_day: isHalfDay ? 1 : 0,
     hours,
     note,
-    status: 'approved'
+    status: initialStatus
   };
 
   try {
@@ -1184,8 +1268,39 @@ async function handleAbsenceSubmit(e) {
 
     closeAbsenceModal();
 
-    // Obnovenie dát podľa aktívneho režimu
     if (state.currentUser.role === 'admin') {
+      loadManagerData();
+      alert('Neprítomnosť bola úspešne zaevidovaná a schválená.');
+    } else {
+      loadEmployeeData();
+      alert('Vaša neprítomnosť bola zaznamenaná a čaká na schválenie administrátorom. V tímovej matici sa zobrazí po schválení zelenou farbou.');
+    }
+  } catch (err) {
+    alert(err.message);
+  }
+}
+
+// Funkcie schvaľovania pre administrátora
+async function approveAbsence(id) {
+  try {
+    const res = await fetch(`/api/absences/${id}/approve`, { method: 'POST' });
+    if (!res.ok) throw new Error('Chyba pri schvaľovaní absencie');
+    if (state.currentUser && state.currentUser.role === 'admin') {
+      loadManagerData();
+    } else {
+      loadEmployeeData();
+    }
+  } catch (err) {
+    alert(err.message);
+  }
+}
+
+async function rejectAbsence(id) {
+  if (!confirm('Naozaj chcete zamietnuť túto žiadosť o absenciu?')) return;
+  try {
+    const res = await fetch(`/api/absences/${id}/reject`, { method: 'POST' });
+    if (!res.ok) throw new Error('Chyba pri zamietaní absencie');
+    if (state.currentUser && state.currentUser.role === 'admin') {
       loadManagerData();
     } else {
       loadEmployeeData();
@@ -1352,17 +1467,28 @@ function openDayDetail(dateStr) {
       const icon = ABSENCE_ICONS[a.type] || '📌';
       const name = ABSENCE_NAMES[a.type] || a.type;
       const subInfo = a.hours ? ` (${a.hours} hod.)` : (a.is_half_day ? ' (pol dňa)' : '');
+      const canDelete = (state.currentUser && (state.currentUser.role === 'admin' || a.employee_id === state.currentUser.id));
 
       item.innerHTML = `
         <div class="timeline-left">
           <span class="timeline-icon">${icon}</span>
           <div>
-            <div class="timeline-dates"><strong>${a.employee_name || 'Zamestnanec'}</strong></div>
+            <div class="timeline-dates">
+              <strong>${a.employee_name || 'Zamestnanec'}</strong>
+              ${a.status === 'approved' ? '<span class="badge-role" style="background:#d1fae5;color:#059669;font-weight:700;margin-left:6px;">✅ Schválené</span>' : ''}
+              ${a.status === 'pending' ? '<span class="badge-role" style="background:#fef3c7;color:#d97706;font-weight:700;margin-left:6px;">⏳ Čaká na schválenie</span>' : ''}
+            </div>
             <div class="timeline-meta">${name}${subInfo} ${a.note ? `• <em>${a.note}</em>` : ''}</div>
           </div>
         </div>
-        <div>
-          <button class="btn btn-xs btn-outline" onclick="deleteAbsence(${a.id}); closeDayDetailModal();">🗑️</button>
+        <div style="display:flex; gap:6px; align-items:center;">
+          ${(state.currentUser && state.currentUser.role === 'admin' && a.status === 'pending') ? `
+            <button class="btn btn-xs btn-primary" style="background:#10b981;border-color:#10b981;" onclick="approveAbsence(${a.id}); closeDayDetailModal();" title="Schváliť túto absenciu">✅ Schváliť</button>
+            <button class="btn btn-xs btn-outline" style="color:#dc2626;" onclick="rejectAbsence(${a.id}); closeDayDetailModal();" title="Zamietnuť">❌</button>
+          ` : ''}
+          ${canDelete ? `
+            <button class="btn btn-xs btn-outline" onclick="deleteAbsence(${a.id}); closeDayDetailModal();" title="Zmazať">🗑️</button>
+          ` : ''}
         </div>
       `;
       body.appendChild(item);

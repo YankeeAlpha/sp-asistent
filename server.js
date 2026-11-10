@@ -397,9 +397,11 @@ const server = http.createServer(async (req, res) => {
       }
 
       const finalEndDate = end_date || start_date;
-      const finalStatus = status || 'approved'; // Predvolene schválené, resp. podľa voľby
       const isHalf = is_half_day ? 1 : 0;
       const totalHours = Number(hours) || 0;
+
+      // Ak je explicitne poslaný status (napr. approved od manažéra), použijeme ho, inak pending
+      const finalStatus = status || 'pending';
 
       const stmt = db.prepare(`
         INSERT INTO absences (employee_id, type, start_date, end_date, is_half_day, hours, note, status)
@@ -410,8 +412,31 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 201, {
         success: true,
         id: result.lastInsertRowid,
+        status: finalStatus,
         working_days: calculateWorkingDays(start_date, finalEndDate, isHalf === 1, totalHours)
       });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  // 7b. Schválenie absencie administrátorom
+  if (pathname.startsWith('/api/absences/') && pathname.endsWith('/approve') && method === 'POST') {
+    try {
+      const id = Number(pathname.split('/')[3]);
+      db.prepare("UPDATE absences SET status = 'approved' WHERE id = ?").run(id);
+      return sendJson(res, 200, { success: true, status: 'approved' });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  // 7c. Zamietnutie absencie administrátorom
+  if (pathname.startsWith('/api/absences/') && pathname.endsWith('/reject') && method === 'POST') {
+    try {
+      const id = Number(pathname.split('/')[3]);
+      db.prepare("UPDATE absences SET status = 'rejected' WHERE id = ?").run(id);
+      return sendJson(res, 200, { success: true, status: 'rejected' });
     } catch (e) {
       return sendJson(res, 500, { error: e.message });
     }
