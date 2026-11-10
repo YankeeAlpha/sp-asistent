@@ -122,6 +122,12 @@ function checkSavedAuth() {
   if (saved) {
     try {
       const user = JSON.parse(saved);
+      // Ak je v pamäti stará relácia správcu bez PINu, vyžiadame prihlásenie znova
+      if (user.role === 'admin' && !user.pin) {
+        localStorage.removeItem('sp_asistent_user');
+        showSection('loginSection');
+        return;
+      }
       applyLogin(user);
       return;
     } catch (e) {
@@ -177,6 +183,8 @@ async function handleEmployeeLogin(e) {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Nesprávny PIN');
 
+    data.user.pin = pin;
+
     if (remember) {
       localStorage.setItem('sp_asistent_user', JSON.stringify(data.user));
     }
@@ -205,6 +213,8 @@ async function handleManagerLogin(e) {
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Nesprávny PIN manažéra');
+
+    data.user.pin = pin;
 
     if (remember) {
       localStorage.setItem('sp_asistent_user', JSON.stringify(data.user));
@@ -1240,12 +1250,18 @@ async function handleEmployeeSubmit(e) {
 
   const payload = { name, pin, role, annual_leave_days, color };
   try {
-    const url = id ? `/api/employees/${id}` : '/api/employees';
+    const adminPin = (state.currentUser && state.currentUser.pin) ? state.currentUser.pin : '';
+    let url = id ? `/api/employees/${id}` : '/api/employees';
+    if (adminPin) {
+      url += `?admin_pin=${encodeURIComponent(adminPin)}`;
+    }
+
     const method = id ? 'PUT' : 'POST';
     const headers = { 'Content-Type': 'application/json' };
-    if (state.currentUser && state.currentUser.pin) {
-      headers['x-admin-pin'] = state.currentUser.pin;
+    if (adminPin) {
+      headers['x-admin-pin'] = adminPin;
     }
+
     const res = await fetch(url, {
       method,
       headers,
@@ -1260,6 +1276,7 @@ async function handleEmployeeSubmit(e) {
     await loadEmployees();
     renderEmployeesTable();
     loadManagerData();
+    alert(`Zamestnanec "${name}" bol úspešne uložený.`);
   } catch (err) {
     alert(err.message);
   }
@@ -1285,11 +1302,14 @@ async function deleteEmployee(id, empName) {
   );
 
   const isPermanent = permanentChoice ? 'true' : 'false';
+  const adminPin = state.currentUser ? state.currentUser.pin : '';
+  const url = `/api/employees/${id}?permanent=${isPermanent}&admin_pin=${encodeURIComponent(adminPin)}`;
+
   try {
-    const res = await fetch(`/api/employees/${id}?permanent=${isPermanent}`, {
+    const res = await fetch(url, {
       method: 'DELETE',
       headers: {
-        'x-admin-pin': state.currentUser.pin
+        'x-admin-pin': adminPin
       }
     });
     if (!res.ok) {

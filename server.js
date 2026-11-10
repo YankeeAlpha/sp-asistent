@@ -235,13 +235,14 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 401, { error: 'Nesprávny PIN kód alebo zamestnanec nebol nájdený.' });
       }
 
-      // Bezpečný objekt bez PINu do odpovede
+      // Vraciame používateľa vrátane PINu pre aktívnu reláciu
       return sendJson(res, 200, {
         success: true,
         user: {
           id: employee.id,
           name: employee.name,
           role: employee.role,
+          pin: employee.pin,
           annual_leave_days: employee.annual_leave_days,
           color: employee.color
         }
