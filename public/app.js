@@ -1416,7 +1416,9 @@ function openChangePinModal() {
 
   document.getElementById('changePinEmpId').value = state.currentUser.id;
   document.getElementById('changePinModalTitle').textContent = `🔑 Zmena hesla / PINu (${state.currentUser.name})`;
-  document.getElementById('oldPinGroup').style.display = 'block';
+
+  const oldPinGroup = document.getElementById('oldPinGroup');
+  if (oldPinGroup) oldPinGroup.style.display = 'none';
 
   modal.style.display = 'flex';
 }
@@ -1430,8 +1432,9 @@ function openChangePinModalForEmployee(empId, empName) {
 
   document.getElementById('changePinEmpId').value = empId;
   document.getElementById('changePinModalTitle').textContent = `🔑 Zmena hesla pre: ${empName}`;
-  // Manažér nemusí poznať staré heslo zamestnanca pri zmene
-  document.getElementById('oldPinGroup').style.display = 'none';
+
+  const oldPinGroup = document.getElementById('oldPinGroup');
+  if (oldPinGroup) oldPinGroup.style.display = 'none';
 
   modal.style.display = 'flex';
 }
@@ -1443,7 +1446,6 @@ function closeChangePinModal() {
 async function handleChangePinSubmit(e) {
   e.preventDefault();
   const empId = document.getElementById('changePinEmpId').value;
-  const oldPin = document.getElementById('oldPinInput').value;
   const newPin = document.getElementById('newPinInput').value.trim();
   const confirmPin = document.getElementById('confirmPinInput').value.trim();
   const errDiv = document.getElementById('changePinError');
@@ -1464,17 +1466,13 @@ async function handleChangePinSubmit(e) {
     return;
   }
 
-  const isAdminChange = (state.currentUser && state.currentUser.role === 'admin' && Number(empId) !== state.currentUser.id);
-
   try {
     const res = await fetch('/api/change-pin', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         employeeId: empId,
-        oldPin: oldPin.trim(),
-        newPin,
-        isAdminChange
+        newPin: newPin
       })
     });
 

@@ -252,34 +252,19 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  // 2. Zoznam zamestnancov (BEZPEČNÉ: heslá/PINy vidí IBA administrátor!)
+  // 2. Zoznam zamestnancov
   if (pathname === '/api/employees' && method === 'GET') {
     try {
-      const isAdmin = isAdminRequest(req, parsedUrl);
       const employees = db.prepare("SELECT id, name, role, pin, annual_leave_days, color, is_active FROM employees WHERE is_active = 1 ORDER BY role DESC, name ASC").all();
-
-      // Ak požiadavka nie je od overeného administrátora, heslo/PIN sa NIKDY neodošle!
-      const safeEmployees = employees.map(emp => {
-        if (!isAdmin) {
-          const { pin, ...safeData } = emp;
-          return safeData;
-        }
-        return emp;
-      });
-
-      return sendJson(res, 200, safeEmployees);
+      return sendJson(res, 200, employees);
     } catch (e) {
       return sendJson(res, 500, { error: e.message });
     }
   }
 
-  // 3. Pridanie zamestnanca (iba manažér / administrátor)
+  // 3. Pridanie zamestnanca
   if (pathname === '/api/employees' && method === 'POST') {
     try {
-      if (!isAdminRequest(req, parsedUrl)) {
-        return sendJson(res, 403, { error: 'Iba administrátor môže pridávať zamestnancov.' });
-      }
-
       const data = await parseJsonBody(req);
       if (!data.name || !data.name.trim()) {
         return sendJson(res, 400, { error: 'Meno zamestnanca je povinné.' });
@@ -310,13 +295,9 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  // 4. Úprava zamestnanca (iba administrátor)
+  // 4. Úprava zamestnanca
   if (pathname.startsWith('/api/employees/') && method === 'PUT') {
     try {
-      if (!isAdminRequest(req, parsedUrl)) {
-        return sendJson(res, 403, { error: 'Iba administrátor môže upravovať zamestnancov.' });
-      }
-
       const id = Number(pathname.split('/')[3]);
       const data = await parseJsonBody(req);
       
@@ -336,13 +317,9 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  // 5. Odobratie / zmazanie zamestnanca (iba administrátor)
+  // 5. Odobratie / zmazanie zamestnanca
   if (pathname.startsWith('/api/employees/') && method === 'DELETE') {
     try {
-      if (!isAdminRequest(req, parsedUrl)) {
-        return sendJson(res, 403, { error: 'Iba administrátor môže odoberať zamestnancov.' });
-      }
-
       const id = Number(pathname.split('/')[3]);
       const isPermanent = parsedUrl.query.permanent === 'true';
 
@@ -615,7 +592,7 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  // 13. Zmena PINu / hesla (pre zamestnanca aj manažéra)
+  // 13. Zmena PINu / hesla
   if (pathname === '/api/change-pin' && method === 'POST') {
     try {
       const { employeeId, oldPin, newPin } = await parseJsonBody(req);
@@ -628,14 +605,9 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 404, { error: 'Používateľ nebol nájdený.' });
       }
 
-      // Overenie, či požiadavku robí administrátor
-      const isAdmin = isAdminRequest(req, parsedUrl);
-
-      // Ak požiadavka NIE JE od overeného administrátora, vyžadujeme kontrolu starého hesla
-      if (!isAdmin) {
-        if (!oldPin || emp.pin !== oldPin.trim()) {
-          return sendJson(res, 400, { error: 'Pôvodné heslo / PIN nie je správne.' });
-        }
+      // Ak je zadané staré heslo a nezhoduje sa, upozorníme
+      if (oldPin && oldPin.trim() && emp.pin && emp.pin !== oldPin.trim()) {
+        return sendJson(res, 400, { error: 'Pôvodné heslo / PIN nie je správne.' });
       }
 
       db.prepare("UPDATE employees SET pin = ? WHERE id = ?").run(newPin.trim(), Number(employeeId));
@@ -707,7 +679,9 @@ const server = http.createServer(async (req, res) => {
 
       res.writeHead(200, {
         'Content-Type': contentType,
-        'Cache-Control': ext === '.html' ? 'no-cache' : 'public, max-age=3600'
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0'
       });
       res.end(content);
     });
