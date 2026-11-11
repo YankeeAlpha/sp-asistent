@@ -40,6 +40,87 @@ function jsonReply(data, status = 200) {
   });
 }
 
+const ABSENCE_TYPE_LABELS = {
+  dovolenka: 'Dovolenka',
+  pn: 'PN',
+  ocr: 'OČR',
+  lekar: 'Lekár',
+  nahradne: 'Náhradné voľno'
+};
+
+function normalizeNotifyConfig(raw = {}) {
+  return {
+    enabled: raw.enabled !== false,
+    ntfyTopic: String(raw.ntfyTopic || process.env.NTFY_TOPIC || '').trim(),
+    webhookUrl: String(raw.webhookUrl || process.env.NOTIFY_WEBHOOK_URL || '').trim(),
+    telegramToken: String(raw.telegramToken || process.env.TELEGRAM_BOT_TOKEN || '').trim(),
+    telegramChatId: String(raw.telegramChatId || process.env.TELEGRAM_CHAT_ID || '').trim()
+  };
+}
+
+async function sendAdminPushNotification(rawCfg, title, messageText, clickUrl) {
+  const cfg = normalizeNotifyConfig(rawCfg);
+  if (!cfg.enabled) return [];
+  const tasks = [];
+  const results = [];
+
+  if (cfg.ntfyTopic) {
+    const cleanTopic = cfg.ntfyTopic.replace(/^https?:\/\/ntfy\.sh\//i, '').replace(/^\/+/, '');
+    if (cleanTopic) {
+      tasks.push(
+        fetch('https://ntfy.sh/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            topic: cleanTopic,
+            title,
+            message: messageText,
+            priority: 4,
+            tags: ['bell', 'calendar'],
+            click: clickUrl || undefined
+          }),
+          signal: AbortSignal.timeout(4000)
+        })
+          .then(r => results.push({ channel: 'ntfy', ok: r.ok, status: r.status }))
+          .catch(e => results.push({ channel: 'ntfy', ok: false, error: e.message }))
+      );
+    }
+  }
+
+  if (cfg.telegramToken && cfg.telegramChatId) {
+    const fullText = `${title}\n${messageText}${clickUrl ? `\n${clickUrl}` : ''}`;
+    tasks.push(
+      fetch(`https://api.telegram.org/bot${cfg.telegramToken}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: cfg.telegramChatId, text: fullText }),
+        signal: AbortSignal.timeout(4000)
+      })
+        .then(r => results.push({ channel: 'telegram', ok: r.ok, status: r.status }))
+        .catch(e => results.push({ channel: 'telegram', ok: false, error: e.message }))
+    );
+  }
+
+  if (cfg.webhookUrl && /^https?:\/\//i.test(cfg.webhookUrl)) {
+    const fullText = `**${title}**\n${messageText}${clickUrl ? `\n${clickUrl}` : ''}`;
+    tasks.push(
+      fetch(cfg.webhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: fullText, text: fullText, title, message: messageText, url: clickUrl }),
+        signal: AbortSignal.timeout(4000)
+      })
+        .then(r => results.push({ channel: 'webhook', ok: r.ok, status: r.status }))
+        .catch(e => results.push({ channel: 'webhook', ok: false, error: e.message }))
+    );
+  }
+
+  if (tasks.length > 0) {
+    await Promise.allSettled(tasks);
+  }
+  return results;
+}
+
 function calculateEaster(year) {
   const a = year % 19;
   const b = Math.floor(year / 100);
@@ -114,6 +195,9 @@ async function getDb(store) {
   }
   if (!Array.isArray(db.schedules)) db.schedules = [];
   if (!Array.isArray(db.absences)) db.absences = [];
+  if (!db.notifyConfig || typeof db.notifyConfig !== 'object') {
+    db.notifyConfig = normalizeNotifyConfig({});
+  }
   return db;
 }
 
@@ -279,6 +363,23 @@ async function handleWithBlobs(request, url, pathname, method) {
     };
     db.absences.push(newAbs);
     await saveDb(store, db);
+
+    if (newAbs.status === 'pending') {
+      const emp = db.employees.find(e => Number(e.id) === Number(newAbs.employee_id));
+      const empName = emp ? emp.name : `Zamestnanec #${newAbs.employee_id}`;
+      const typeLabel = ABSENCE_TYPE_LABELS[newAbs.type] || newAbs.type;
+      const dateText = newAbs.start_date === newAbs.end_date
+        ? newAbs.start_date
+        : `${newAbs.start_date} až ${newAbs.end_date}`;
+      const notePart = newAbs.note ? `\nPoznámka: ${newAbs.note}` : '';
+      await sendAdminPushNotification(
+        db.notifyConfig,
+        'SP Asistent: Nová žiadosť o nedostupnosť',
+        `${empName} žiada o ${typeLabel} (${dateText}).${notePart}`,
+        url.origin
+      );
+    }
+
     return jsonReply({ success: true, id: nextId });
   }
 
@@ -419,6 +520,27 @@ async function handleWithBlobs(request, url, pathname, method) {
     emp.pin = newPin;
     await saveDb(store, db);
     return jsonReply({ success: true, message: 'Heslo / PIN bolo úspešne zmenené.' });
+  }
+
+  if (pathname === '/api/notifications/config' && method === 'GET') {
+    return jsonReply(normalizeNotifyConfig(db.notifyConfig));
+  }
+
+  if (pathname === '/api/notifications/config' && method === 'POST') {
+    db.notifyConfig = normalizeNotifyConfig(body);
+    await saveDb(store, db);
+    return jsonReply({ success: true, config: db.notifyConfig });
+  }
+
+  if (pathname === '/api/notifications/test' && method === 'POST') {
+    const cfg = body && Object.keys(body).length > 0 ? normalizeNotifyConfig(body) : normalizeNotifyConfig(db.notifyConfig);
+    const results = await sendAdminPushNotification(
+      cfg,
+      'SP Asistent: Test notifikácie',
+      'Testovacie upozornenie funguje! Keď zamestnanec požiada o nedostupnosť, príde vám podobná správa.',
+      url.origin
+    );
+    return jsonReply({ success: true, results });
   }
 
   if (pathname === '/api/backup/export' && method === 'GET') {

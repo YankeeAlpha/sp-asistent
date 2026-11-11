@@ -468,6 +468,27 @@ async function handleClientApi(urlStr, init = {}) {
     });
   }
 
+  if (pathname === '/api/notifications/config' && method === 'GET') {
+    let saved = {};
+    try { saved = JSON.parse(localStorage.getItem('sp_asistent_notify_cfg') || '{}'); } catch (e) {}
+    return reply({
+      enabled: saved.enabled !== false,
+      ntfyTopic: saved.ntfyTopic || '',
+      webhookUrl: saved.webhookUrl || '',
+      telegramToken: saved.telegramToken || '',
+      telegramChatId: saved.telegramChatId || ''
+    });
+  }
+
+  if (pathname === '/api/notifications/config' && method === 'POST') {
+    try { localStorage.setItem('sp_asistent_notify_cfg', JSON.stringify(body || {})); } catch (e) {}
+    return reply({ success: true, config: body || {} });
+  }
+
+  if (pathname === '/api/notifications/test' && method === 'POST') {
+    return reply({ success: true, results: [{ channel: 'browser', ok: true }] });
+  }
+
   return reply({ error: 'Neznámy API endpoint' }, 404);
 }
 
@@ -1208,6 +1229,7 @@ async function loadManagerData() {
   await loadManagerStats();
   renderActiveManagerTab();
   initQrCodeView();
+  refreshNotifyButtonState();
 }
 
 async function fetchManagerAbsences() {
@@ -1220,6 +1242,7 @@ async function fetchManagerAbsences() {
     if (res.ok) {
       state.absences = await res.json();
       saveLocalEmergencyBackup();
+      processPendingNotificationsForAdmin();
     }
   } catch (e) {
     console.error('fetchManagerAbsences error:', e);
@@ -3454,4 +3477,277 @@ function escapeHtml(str) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+}
+
+// =========================================================================
+// 🔔 NOTIFIKÁCIE PRE ADMINISTRÁTORA (PREHLIADAČ + PUSH NA MOBIL CEZ NTFY)
+// =========================================================================
+let knownPendingAbsenceIds = new Set();
+let pendingTrackerInitialized = false;
+let lastAdminTrackerUserId = null;
+
+function formatAbsenceTypeSk(type) {
+  const map = {
+    dovolenka: 'Dovolenka',
+    pn: 'PN',
+    ocr: 'OČR',
+    lekar: 'Lekár',
+    nahradne: 'Náhradné voľno'
+  };
+  return map[type] || type;
+}
+
+function processPendingNotificationsForAdmin() {
+  if (!state.currentUser || state.currentUser.role !== 'admin') return;
+
+  if (lastAdminTrackerUserId !== state.currentUser.id) {
+    lastAdminTrackerUserId = state.currentUser.id;
+    knownPendingAbsenceIds = new Set();
+    pendingTrackerInitialized = false;
+  }
+
+  const pendingList = (state.absences || []).filter(a => a.status === 'pending');
+  const badge = document.getElementById('mgrPendingBadge');
+  if (badge) {
+    if (pendingList.length > 0) {
+      badge.textContent = String(pendingList.length);
+      badge.style.display = 'inline-flex';
+    } else {
+      badge.style.display = 'none';
+    }
+  }
+
+  if (!pendingTrackerInitialized) {
+    pendingList.forEach(a => knownPendingAbsenceIds.add(Number(a.id)));
+    pendingTrackerInitialized = true;
+    return;
+  }
+
+  const newlyAdded = pendingList.filter(a => !knownPendingAbsenceIds.has(Number(a.id)));
+  pendingList.forEach(a => knownPendingAbsenceIds.add(Number(a.id)));
+
+  if (newlyAdded.length > 0) {
+    newlyAdded.forEach(reqItem => {
+      const emp = (state.employees || []).find(e => Number(e.id) === Number(reqItem.employee_id));
+      const empName = reqItem.employee_name || (emp && emp.name) || 'Zamestnanec';
+      const typeLabel = formatAbsenceTypeSk(reqItem.type);
+      const dateText = reqItem.start_date === reqItem.end_date
+        ? reqItem.start_date
+        : `${reqItem.start_date} až ${reqItem.end_date}`;
+      const bodyMsg = `${empName} žiada o ${typeLabel} (${dateText}).`;
+
+      showToast(`🔔 Nová žiadosť: ${bodyMsg}`, 'info');
+      showAdminBrowserNotification('Nová žiadosť o nedostupnosť', bodyMsg);
+    });
+  }
+}
+
+function showAdminBrowserNotification(title, body) {
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  try {
+    if (navigator.serviceWorker && navigator.serviceWorker.ready) {
+      navigator.serviceWorker.ready.then(reg => {
+        if (reg && typeof reg.showNotification === 'function') {
+          reg.showNotification(title, {
+            body,
+            icon: 'icons/icon-192.png',
+            badge: 'icons/icon-192.png',
+            tag: 'sp-asistent-pending'
+          });
+        } else {
+          new Notification(title, { body, icon: 'icons/icon-192.png' });
+        }
+      }).catch(() => {
+        new Notification(title, { body, icon: 'icons/icon-192.png' });
+      });
+    } else {
+      new Notification(title, { body, icon: 'icons/icon-192.png' });
+    }
+  } catch (e) {}
+}
+
+async function refreshNotifyButtonState() {
+  const btn = document.getElementById('mgrNotifyBtn');
+  if (!btn) return;
+  try {
+    const res = await fetch('/api/notifications/config');
+    if (res.ok) {
+      const cfg = await res.json();
+      const browserGranted = ('Notification' in window) && Notification.permission === 'granted';
+      const hasExternal = cfg.enabled !== false && Boolean(cfg.ntfyTopic || cfg.webhookUrl || (cfg.telegramToken && cfg.telegramChatId));
+      if (hasExternal || browserGranted) {
+        btn.classList.add('btn-notify-active');
+        btn.textContent = hasExternal ? '🔔 Notifikácie: Zapnuté' : '🔔 Notifikácie: Prehliadač';
+      } else {
+        btn.classList.remove('btn-notify-active');
+        btn.textContent = '🔔 Notifikácie';
+      }
+    }
+  } catch (e) {}
+}
+
+function updateBrowserNotifyStatusText() {
+  const el = document.getElementById('browserNotifyPermText');
+  if (!el) return;
+  if (!('Notification' in window)) {
+    el.textContent = 'Tento prehliadač nepodporuje systémové notifikácie.';
+    return;
+  }
+  if (Notification.permission === 'granted') {
+    el.textContent = 'Stav: ✅ Povolené – bubliny sa zobrazia pri otvorenej alebo minimalizovanej appke.';
+  } else if (Notification.permission === 'denied') {
+    el.textContent = 'Stav: ❌ Zablokované v prehliadači (povoľte ich v ikone zámku vedľa adresy webu).';
+  } else {
+    el.textContent = 'Stav: ⚪ Zatiaľ nepovolené – kliknite na tlačidlo vpravo.';
+  }
+}
+
+function updateNtfyPreviewLink() {
+  const input = document.getElementById('notifyNtfyTopicInput');
+  const wrap = document.getElementById('notifyNtfyLinkWrap');
+  const link = document.getElementById('notifyNtfyOpenLink');
+  if (!input || !wrap || !link) return;
+  const clean = input.value.trim().replace(/^https?:\/\/ntfy\.sh\//i, '').replace(/^\/+/, '');
+  if (clean) {
+    const fullUrl = `https://ntfy.sh/${encodeURIComponent(clean)}`;
+    link.href = fullUrl;
+    link.textContent = fullUrl;
+    wrap.style.display = 'block';
+  } else {
+    wrap.style.display = 'none';
+  }
+}
+
+async function openNotifySettingsModal() {
+  const modal = document.getElementById('notifySettingsModal');
+  const statusEl = document.getElementById('notifySettingsStatus');
+  if (statusEl) statusEl.textContent = '';
+  updateBrowserNotifyStatusText();
+
+  const topicInput = document.getElementById('notifyNtfyTopicInput');
+  if (topicInput && !topicInput._boundInput) {
+    topicInput.addEventListener('input', updateNtfyPreviewLink);
+    topicInput._boundInput = true;
+  }
+
+  try {
+    const res = await fetch('/api/notifications/config');
+    if (res.ok) {
+      const cfg = await res.json();
+      if (topicInput) topicInput.value = cfg.ntfyTopic || '';
+      const tgTokenEl = document.getElementById('notifyTelegramTokenInput');
+      const tgChatEl = document.getElementById('notifyTelegramChatIdInput');
+      const whEl = document.getElementById('notifyWebhookUrlInput');
+      const enEl = document.getElementById('notifyEnabledCheckbox');
+      if (tgTokenEl) tgTokenEl.value = cfg.telegramToken || '';
+      if (tgChatEl) tgChatEl.value = cfg.telegramChatId || '';
+      if (whEl) whEl.value = cfg.webhookUrl || '';
+      if (enEl) enEl.checked = cfg.enabled !== false;
+      updateNtfyPreviewLink();
+    }
+  } catch (e) {}
+
+  if (modal) modal.style.display = 'flex';
+}
+
+function closeNotifySettingsModal() {
+  const modal = document.getElementById('notifySettingsModal');
+  if (modal) modal.style.display = 'none';
+}
+
+async function requestBrowserNotifyPermission() {
+  if (!('Notification' in window)) {
+    alert('Váš prehliadač nepodporuje systémové notifikácie.');
+    return;
+  }
+  const perm = await Notification.requestPermission();
+  updateBrowserNotifyStatusText();
+  refreshNotifyButtonState();
+  if (perm === 'granted') {
+    showAdminBrowserNotification('SP Asistent', 'Prehliadačové notifikácie sú zapnuté!');
+    showToast('✅ Notifikácie v prehliadači boli povolené.', 'success');
+  } else if (perm === 'denied') {
+    showToast('Notifikácie ostali zablokované v nastaveniach prehliadača.', 'error');
+  }
+}
+
+function generateRandomNtfyTopic() {
+  const rand = Math.random().toString(36).slice(2, 8);
+  const topic = `sp-asistent-admin-${rand}`;
+  const input = document.getElementById('notifyNtfyTopicInput');
+  if (input) input.value = topic;
+  updateNtfyPreviewLink();
+  showToast('⚡ Tajný kanál vygenerovaný! Nezabudnite ho uložiť a pridať do appky ntfy v mobile.', 'info');
+}
+
+function collectNotifyFormValues() {
+  const topicRaw = (document.getElementById('notifyNtfyTopicInput')?.value || '').trim();
+  const cleanTopic = topicRaw.replace(/^https?:\/\/ntfy\.sh\//i, '').replace(/^\/+/, '');
+  return {
+    enabled: Boolean(document.getElementById('notifyEnabledCheckbox')?.checked),
+    ntfyTopic: cleanTopic,
+    telegramToken: (document.getElementById('notifyTelegramTokenInput')?.value || '').trim(),
+    telegramChatId: (document.getElementById('notifyTelegramChatIdInput')?.value || '').trim(),
+    webhookUrl: (document.getElementById('notifyWebhookUrlInput')?.value || '').trim()
+  };
+}
+
+async function saveNotifySettings() {
+  const payload = collectNotifyFormValues();
+  const statusEl = document.getElementById('notifySettingsStatus');
+  if (statusEl) statusEl.textContent = '⏳ Ukladám nastavenia...';
+  try {
+    const res = await fetch('/api/notifications/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) throw new Error('Nepodarilo sa uložiť nastavenia.');
+    if (statusEl) {
+      statusEl.innerHTML = '<span style="color: #059669;">✅ Nastavenia boli uložené do cloudu.</span>';
+    }
+    refreshNotifyButtonState();
+    showToast('✅ Nastavenia notifikácií boli uložené!', 'success');
+  } catch (e) {
+    if (statusEl) statusEl.innerHTML = `<span style="color: #dc2626;">❌ ${escapeHtml(e.message)}</span>`;
+  }
+}
+
+async function testAdminNotification() {
+  const payload = collectNotifyFormValues();
+  const statusEl = document.getElementById('notifySettingsStatus');
+  if (statusEl) statusEl.textContent = '⏳ Odosielam testovaciu notifikáciu...';
+
+  if (('Notification' in window) && Notification.permission === 'granted') {
+    showAdminBrowserNotification('SP Asistent (Test)', 'Prehliadačové upozornenia fungujú!');
+  }
+
+  try {
+    const res = await fetch('/api/notifications/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    const sent = Array.isArray(data.results) ? data.results : [];
+    const okList = sent.filter(r => r.ok).map(r => r.channel);
+    const failList = sent.filter(r => !r.ok).map(r => `${r.channel} (${r.status || r.error || 'chyba'})`);
+
+    if (okList.length > 0) {
+      if (statusEl) {
+        statusEl.innerHTML = `<span style="color: #059669;">✅ Odoslané na: ${escapeHtml(okList.join(', '))}. Skontrolujte mobil!</span>`;
+      }
+      showToast('🔔 Testovacia notifikácia odoslaná!', 'success');
+    } else if (failList.length > 0) {
+      if (statusEl) {
+        statusEl.innerHTML = `<span style="color: #dc2626;">❌ Chyba odoslania: ${escapeHtml(failList.join(', '))}</span>`;
+      }
+    } else {
+      if (statusEl) {
+        statusEl.innerHTML = '<span style="color: #b45309;">⚠️ Nie je zadaný žiadny externý kanál (ntfy / Telegram / Webhook). Pre mobilný push pri zatvorenej appke vygenerujte ntfy kanál vyššie.</span>';
+      }
+    }
+  } catch (e) {
+    if (statusEl) statusEl.innerHTML = `<span style="color: #dc2626;">❌ ${escapeHtml(e.message)}</span>`;
+  }
 }

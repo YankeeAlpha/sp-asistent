@@ -20,7 +20,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
   
-  <link rel="stylesheet" href="styles.css?v=4.2">
+  <link rel="stylesheet" href="styles.css?v=4.3">
 </head>
 <body>
   <!-- HLAVIČKA APLIKÁCIE -->
@@ -388,7 +388,7 @@
           📊 Tímová matica
         </button>
         <button class="mgr-tab" onclick="switchManagerTab('list')">
-          📋 Všetky absencie
+          📋 Všetky absencie <span id="mgrPendingBadge" class="pending-tab-badge" style="display: none;">0</span>
         </button>
         <button class="mgr-tab" onclick="switchManagerTab('stats')">
           📈 Štatistiky & Zostatky
@@ -424,6 +424,9 @@
         <div class="action-bar-right">
           <button class="btn btn-primary" onclick="openAbsenceModalForManager()">
             ➕ Zadať absenciu za zamestnanca
+          </button>
+          <button type="button" id="mgrNotifyBtn" class="btn btn-outline" onclick="openNotifySettingsModal()" title="Nastaviť notifikácie pri žiadosti zamestnanca">
+            🔔 Notifikácie
           </button>
           <button class="btn btn-outline" onclick="exportDataCsv()">
             📥 Export do Excelu (CSV)
@@ -1087,7 +1090,78 @@
     </div>
   </div>
 
+  <!-- MODAL: NASTAVENIE NOTIFIKÁCIÍ PRE ADMINISTRÁTORA -->
+  <div id="notifySettingsModal" class="modal-backdrop" style="display: none;">
+    <div class="modal-card" style="max-width: 580px;">
+      <div class="modal-header">
+        <h3 class="modal-title">🔔 Notifikácie o žiadostiach zamestnancov</h3>
+        <button type="button" class="modal-close-btn" onclick="closeNotifySettingsModal()">✕</button>
+      </div>
+      <div class="modal-body" style="font-size: 14px; line-height: 1.55;">
+        <div style="background: #f8fafc; border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; margin-bottom: 14px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap;">
+            <div>
+              <strong style="display: block; color: #0f172a;">1. Upozornenie v prehliadači (keď je appka otvorená)</strong>
+              <span id="browserNotifyPermText" style="font-size: 12px; color: var(--text-muted);">Stav: zisťujem...</span>
+            </div>
+            <button type="button" class="btn btn-sm btn-primary" onclick="requestBrowserNotifyPermission()">🔔 Povoliť v prehliadači</button>
+          </div>
+        </div>
+
+        <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 10px; padding: 14px; margin-bottom: 14px;">
+          <strong style="display: block; color: #1e3a8a; margin-bottom: 6px;">2. Okamžitá Push notifikácia na mobil aj keď je appka ZATVORENÁ (cez ntfy – zadarmo)</strong>
+          <ol style="margin: 0 0 10px; padding-left: 18px; color: #1e40af; font-size: 13px;">
+            <li>Kliknite na <strong>⚡ Vygenerovať kanál</strong> (alebo zadajte vlastný tajný názov).</li>
+            <li>V mobile si stiahnite bezplatnú appku <strong>ntfy</strong> (Android / iPhone) a prihláste sa (<em>+ Subscribe</em>) do tohto istého názvu kanála.</li>
+            <li>Kliknite <strong>💾 Uložiť nastavenia</strong> a vyskúšajte <strong>🧪 Test notifikácie</strong>.</li>
+          </ol>
+
+          <label for="notifyNtfyTopicInput" class="form-label" style="font-weight: 600;">Názov vášho ntfy kanála:</label>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            <input type="text" id="notifyNtfyTopicInput" class="form-control" style="flex: 1; min-width: 190px;" placeholder="napr. sp-asistent-jan-4821">
+            <button type="button" class="btn btn-sm btn-outline" onclick="generateRandomNtfyTopic()">⚡ Vygenerovať kanál</button>
+          </div>
+          <div id="notifyNtfyLinkWrap" style="margin-top: 6px; font-size: 12px; color: #1d4ed8; display: none;">
+            Adresa kanála: <a id="notifyNtfyOpenLink" href="#" target="_blank" rel="noopener" style="font-weight: 600;"></a>
+          </div>
+        </div>
+
+        <details style="margin-bottom: 12px; border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px;">
+          <summary style="cursor: pointer; font-weight: 600; color: #334155;">⚙️ Voliteľné ďalšie kanály (Telegram / Discord / Slack Webhook)</summary>
+          <div style="margin-top: 10px; display: flex; flex-direction: column; gap: 10px;">
+            <div>
+              <label for="notifyTelegramTokenInput" class="form-label" style="font-size: 12px;">Telegram Bot Token (voliteľné)</label>
+              <input type="text" id="notifyTelegramTokenInput" class="form-control" placeholder="123456789:AAH...">
+            </div>
+            <div>
+              <label for="notifyTelegramChatIdInput" class="form-label" style="font-size: 12px;">Telegram Chat ID (voliteľné)</label>
+              <input type="text" id="notifyTelegramChatIdInput" class="form-control" placeholder="napr. 987654321">
+            </div>
+            <div>
+              <label for="notifyWebhookUrlInput" class="form-label" style="font-size: 12px;">Discord / Slack / Make Webhook URL (voliteľné)</label>
+              <input type="url" id="notifyWebhookUrlInput" class="form-control" placeholder="https://discord.com/api/webhooks/...">
+            </div>
+          </div>
+        </details>
+
+        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; margin-bottom: 8px;">
+          <input type="checkbox" id="notifyEnabledCheckbox" checked>
+          <span><strong>Aktívne:</strong> Posielať notifikáciu pri každej novej žiadosti zamestnanca</span>
+        </label>
+
+        <div id="notifySettingsStatus" style="font-size: 13px; min-height: 20px; margin-top: 6px;"></div>
+      </div>
+      <div class="modal-footer" style="justify-content: space-between; flex-wrap: wrap;">
+        <button type="button" class="btn btn-outline" onclick="testAdminNotification()">🧪 Test notifikácie</button>
+        <div style="display: flex; gap: 8px;">
+          <button type="button" class="btn btn-ghost" onclick="closeNotifySettingsModal()">Zavrieť</button>
+          <button type="button" class="btn btn-primary" onclick="saveNotifySettings()">💾 Uložiť nastavenia</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Knižnice a Hlavný skript s cache-buster verziou -->
-  <script src="app.js?v=4.2"></script>
+  <script src="app.js?v=4.3"></script>
 </body>
 </html>

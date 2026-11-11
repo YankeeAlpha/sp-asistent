@@ -1,9 +1,9 @@
-const CACHE_NAME = 'sp-asistent-v4.2';
+const CACHE_NAME = 'sp-asistent-v4.3';
 const STATIC_ASSETS = [
   './',
   'index.html',
-  'styles.css?v=4.2',
-  'app.js?v=4.2',
+  'styles.css?v=4.3',
+  'app.js?v=4.3',
   'manifest.json',
   'icons/icon.svg',
   'icons/icon-192.png',
@@ -44,5 +44,17 @@ self.addEventListener('fetch', event => {
         return response;
       })
       .catch(() => caches.match(event.request).then(cached => cached || caches.match('./')))
+  );
+});
+
+self.addEventListener('notificationclick', event => {
+  event.notification.close();
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clientList => {
+      for (const client of clientList) {
+        if ('focus' in client) return client.focus();
+      }
+      if (self.clients.openWindow) return self.clients.openWindow('./');
+    })
   );
 });

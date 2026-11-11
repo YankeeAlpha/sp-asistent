@@ -528,7 +528,105 @@ async function handleRequest(req, res) {
 
   // --- API ROUTY ---
 
-  // 0a. Health check pre auto-detekciu cloudu vs lokálneho HTML
+  // Pomocné funkcie pre admin push notifikácie (ntfy / Telegram / Webhook)
+const NOTIFY_CONFIG_FILE = path.join(path.dirname(DB_FILE), 'notify_config.json');
+const ABSENCE_TYPE_LABELS = {
+  dovolenka: 'Dovolenka',
+  pn: 'PN',
+  ocr: 'OČR',
+  lekar: 'Lekár',
+  nahradne: 'Náhradné voľno'
+};
+
+function normalizeNotifyConfig(raw = {}) {
+  return {
+    enabled: raw.enabled !== false,
+    ntfyTopic: String(raw.ntfyTopic || process.env.NTFY_TOPIC || '').trim(),
+    webhookUrl: String(raw.webhookUrl || process.env.NOTIFY_WEBHOOK_URL || '').trim(),
+    telegramToken: String(raw.telegramToken || process.env.TELEGRAM_BOT_TOKEN || '').trim(),
+    telegramChatId: String(raw.telegramChatId || process.env.TELEGRAM_CHAT_ID || '').trim()
+  };
+}
+
+function loadLocalNotifyConfig() {
+  try {
+    if (fs.existsSync(NOTIFY_CONFIG_FILE)) {
+      return normalizeNotifyConfig(JSON.parse(fs.readFileSync(NOTIFY_CONFIG_FILE, 'utf8')));
+    }
+  } catch (e) {}
+  return normalizeNotifyConfig({});
+}
+
+function saveLocalNotifyConfig(cfg) {
+  const normalized = normalizeNotifyConfig(cfg);
+  try {
+    fs.writeFileSync(NOTIFY_CONFIG_FILE, JSON.stringify(normalized, null, 2), 'utf8');
+  } catch (e) {}
+  return normalized;
+}
+
+async function sendAdminPushNotification(rawCfg, title, messageText, clickUrl) {
+  const cfg = normalizeNotifyConfig(rawCfg);
+  if (!cfg.enabled) return [];
+  const tasks = [];
+  const results = [];
+
+  if (cfg.ntfyTopic) {
+    const cleanTopic = cfg.ntfyTopic.replace(/^https?:\/\/ntfy\.sh\//i, '').replace(/^\/+/, '');
+    if (cleanTopic) {
+      tasks.push(
+        fetch('https://ntfy.sh/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            topic: cleanTopic,
+            title,
+            message: messageText,
+            priority: 4,
+            tags: ['bell', 'calendar'],
+            click: clickUrl || undefined
+          }),
+          signal: AbortSignal.timeout(4000)
+        })
+          .then(r => results.push({ channel: 'ntfy', ok: r.ok, status: r.status }))
+          .catch(e => results.push({ channel: 'ntfy', ok: false, error: e.message }))
+      );
+    }
+  }
+
+  if (cfg.telegramToken && cfg.telegramChatId) {
+    const fullText = `${title}\n${messageText}${clickUrl ? `\n${clickUrl}` : ''}`;
+    tasks.push(
+      fetch(`https://api.telegram.org/bot${cfg.telegramToken}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: cfg.telegramChatId, text: fullText }),
+        signal: AbortSignal.timeout(4000)
+      })
+        .then(r => results.push({ channel: 'telegram', ok: r.ok, status: r.status }))
+        .catch(e => results.push({ channel: 'telegram', ok: false, error: e.message }))
+    );
+  }
+
+  if (cfg.webhookUrl && /^https?:\/\//i.test(cfg.webhookUrl)) {
+    const fullText = `**${title}**\n${messageText}${clickUrl ? `\n${clickUrl}` : ''}`;
+    tasks.push(
+      fetch(cfg.webhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: fullText, text: fullText, title, message: messageText, url: clickUrl }),
+        signal: AbortSignal.timeout(4000)
+      })
+        .then(r => results.push({ channel: 'webhook', ok: r.ok, status: r.status }))
+        .catch(e => results.push({ channel: 'webhook', ok: false, error: e.message }))
+    );
+  }
+
+  if (tasks.length > 0) await Promise.allSettled(tasks);
+  return results;
+}
+
+// 0a. Health check pre auto-detekciu cloudu vs lokálneho HTML
   if (pathname === '/api/health' && method === 'GET') {
     return sendJson(res, 200, { ok: true, mode: isServerless ? 'cloud' : 'local-server', dbType });
   }
@@ -917,6 +1015,22 @@ async function handleRequest(req, res) {
       );
 
       notifyDataChanged();
+
+      if (finalStatus === 'pending') {
+        const emp = await db.get("SELECT name FROM employees WHERE id = ?", [Number(employee_id)]);
+        const empName = (emp && emp.name) || `Zamestnanec #${employee_id}`;
+        const typeLabel = ABSENCE_TYPE_LABELS[type] || type;
+        const dateText = start_date === finalEndDate ? start_date : `${start_date} až ${finalEndDate}`;
+        const notePart = note ? `\nPoznámka: ${note}` : '';
+        const originUrl = req.headers && req.headers.host ? `http://${req.headers.host}` : undefined;
+        await sendAdminPushNotification(
+          loadLocalNotifyConfig(),
+          'SP Asistent: Nová žiadosť o nedostupnosť',
+          `${empName} žiada o ${typeLabel} (${dateText}).${notePart}`,
+          originUrl
+        );
+      }
+
       return sendJson(res, 201, {
         success: true,
         id: result.lastInsertRowid,
@@ -1192,6 +1306,38 @@ async function handleRequest(req, res) {
       res.setHeader('Access-Control-Allow-Origin', '*');
       res.statusCode = 200;
       return res.end(csv);
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  // 15. Konfigurácia a test admin push notifikácií
+  if (pathname === '/api/notifications/config' && method === 'GET') {
+    return sendJson(res, 200, loadLocalNotifyConfig());
+  }
+
+  if (pathname === '/api/notifications/config' && method === 'POST') {
+    try {
+      const data = await parseJsonBody(req);
+      const saved = saveLocalNotifyConfig(data);
+      return sendJson(res, 200, { success: true, config: saved });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  if (pathname === '/api/notifications/test' && method === 'POST') {
+    try {
+      const data = await parseJsonBody(req);
+      const cfg = data && Object.keys(data).length > 0 ? normalizeNotifyConfig(data) : loadLocalNotifyConfig();
+      const originUrl = req.headers && req.headers.host ? `http://${req.headers.host}` : undefined;
+      const results = await sendAdminPushNotification(
+        cfg,
+        'SP Asistent: Test notifikácie',
+        'Testovacie upozornenie funguje! Keď zamestnanec požiada o nedostupnosť, príde vám podobná správa.',
+        originUrl
+      );
+      return sendJson(res, 200, { success: true, results });
     } catch (e) {
       return sendJson(res, 500, { error: e.message });
     }
