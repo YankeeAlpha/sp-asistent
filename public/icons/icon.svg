@@ -1,38 +1,44 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100%" height="100%">
   <defs>
-    <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
+    <linearGradient id="spBgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1e293b"/>
+      <stop offset="100%" stop-color="#0f172a"/>
+    </linearGradient>
+    <linearGradient id="spCalGrad" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" stop-color="#3b82f6"/>
       <stop offset="100%" stop-color="#1d4ed8"/>
     </linearGradient>
-    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="100%">
+    <linearGradient id="spAccentGrad" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" stop-color="#10b981"/>
       <stop offset="100%" stop-color="#059669"/>
     </linearGradient>
+    <filter id="spDropShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#000" flood-opacity="0.35"/>
+    </filter>
   </defs>
-  <!-- Background with rounded corners -->
-  <rect width="512" height="512" rx="128" fill="#0f172a"/>
+  
+  <!-- Outer Rounded Squircle -->
+  <rect x="6" y="6" width="88" height="88" rx="24" fill="url(#spBgGrad)" stroke="#334155" stroke-width="2" filter="url(#spDropShadow)"/>
+  
   <!-- Calendar Body -->
-  <rect x="80" y="110" width="352" height="320" rx="32" fill="url(#grad)"/>
-  <!-- Top Bar -->
-  <path d="M80 142 A32 32 0 0 1 112 110 L400 110 A32 32 0 0 1 432 142 L432 180 L80 180 Z" fill="#1e40af"/>
-  <!-- Spiral Binders -->
-  <rect x="140" y="70" width="24" height="60" rx="12" fill="#e2e8f0"/>
-  <rect x="348" y="70" width="24" height="60" rx="12" fill="#e2e8f0"/>
-  <!-- Calendar Grid Dots -->
-  <circle cx="150" cy="240" r="14" fill="#93c5fd" opacity="0.8"/>
-  <circle cx="210" cy="240" r="14" fill="#93c5fd" opacity="0.8"/>
-  <circle cx="270" cy="240" r="14" fill="#93c5fd" opacity="0.8"/>
-  <circle cx="330" cy="240" r="14" fill="#93c5fd" opacity="0.8"/>
+  <rect x="18" y="24" width="64" height="58" rx="12" fill="url(#spCalGrad)"/>
   
-  <circle cx="150" cy="300" r="14" fill="#93c5fd" opacity="0.8"/>
-  <circle cx="210" cy="300" r="14" fill="#93c5fd" opacity="0.8"/>
-  <circle cx="270" cy="300" r="14" fill="#93c5fd" opacity="0.8"/>
-  <circle cx="330" cy="300" r="14" fill="#93c5fd" opacity="0.8"/>
-
-  <circle cx="150" cy="360" r="14" fill="#93c5fd" opacity="0.8"/>
-  <circle cx="210" cy="360" r="14" fill="#93c5fd" opacity="0.8"/>
+  <!-- Calendar Header Strip -->
+  <path d="M18 34 A10 10 0 0 1 28 24 L72 24 A10 10 0 0 1 82 34 L82 40 L18 40 Z" fill="#1e40af"/>
   
-  <!-- Checkmark Badge -->
-  <circle cx="360" cy="360" r="64" fill="url(#accent)" stroke="#0f172a" stroke-width="12"/>
-  <path d="M335 360 L352 378 L388 340" fill="none" stroke="#ffffff" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Rings -->
+  <rect x="30" y="16" width="6" height="14" rx="3" fill="#f8fafc"/>
+  <rect x="64" y="16" width="6" height="14" rx="3" fill="#f8fafc"/>
+  
+  <!-- "SP" Letters in Center of Calendar -->
+  <text x="50" y="62" font-family="'Inter', -apple-system, sans-serif" font-size="22" font-weight="900" fill="#ffffff" text-anchor="middle" letter-spacing="0.5">SP</text>
+  
+  <!-- Small Calendar Grid Accents -->
+  <circle cx="28" cy="72" r="2.5" fill="#93c5fd" opacity="0.9"/>
+  <circle cx="38" cy="72" r="2.5" fill="#93c5fd" opacity="0.9"/>
+  <circle cx="48" cy="72" r="2.5" fill="#93c5fd" opacity="0.9"/>
+  
+  <!-- Glowing Checkmark / Approval Badge -->
+  <circle cx="74" cy="74" r="14" fill="url(#spAccentGrad)" stroke="#0f172a" stroke-width="3"/>
+  <path d="M68 74 L72 78 L80 69" fill="none" stroke="#ffffff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>

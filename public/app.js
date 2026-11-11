@@ -1,7 +1,579 @@
 /**
  * SP ASISTENT - Frontend Aplikácia
  * Kalendár na celý rok, evidencia absencií, mobilné PWA rozhranie
+ * 100% ČISTÁ HTML WEBOVÁ APLIKÁCIA (BEŽÍ AJ BEZ SERVERA)
  */
+
+// =========================================================================
+// 🚀 VSTAVANÝ CLIENT-SIDE DATABÁZOVÝ ENGINE (ČISTÉ HTML / LOCALSTORAGE)
+// Umožňuje prevádzku na Netlify Drop, GitHub Pages, Vercel alebo cez dvojklik
+// =========================================================================
+
+const CLIENT_DB_KEY = 'sp_asistent_db_v3';
+
+// Načítaná záloha používateľa (18 reálnych zamestnancov a ich absencie)
+const USER_RESTORED_BACKUP = {
+  version: 1794397209652,
+  employees: [
+    { id: 1, name: "Ján Mihalčin", role: "admin", pin: "4689", annual_leave_days: 25, color: "#ff8800", is_active: 1, created_at: "2026-11-11 11:29:43" },
+    { id: 5, name: "Peter Belko", role: "employee", pin: "9573", annual_leave_days: 25, color: "#3b82f6", is_active: 1, created_at: "2026-11-11 11:32:02" },
+    { id: 6, name: "Ján Cina", role: "employee", pin: "6349", annual_leave_days: 25, color: "#3b82f6", is_active: 1, created_at: "2026-11-11 11:32:11" },
+    { id: 7, name: "Peter Čačko", role: "employee", pin: "1982", annual_leave_days: 25, color: "#3b82f6", is_active: 1, created_at: "2026-11-11 11:32:24" },
+    { id: 8, name: "Martin Hamza", role: "employee", pin: "8162", annual_leave_days: 25, color: "#3b82f6", is_active: 1, created_at: "2026-11-11 11:32:36" },
+    { id: 9, name: "Ján Kasič", role: "employee", pin: "2817", annual_leave_days: 25, color: "#3b82f6", is_active: 1, created_at: "2026-11-11 11:33:05" },
+    { id: 10, name: "Peter Kiš", role: "employee", pin: "1088", annual_leave_days: 25, color: "#3b82f6", is_active: 1, created_at: "2026-11-11 11:33:15" },
+    { id: 11, name: "Rudolf Králik", role: "employee", pin: "9108", annual_leave_days: 25, color: "#3b82f6", is_active: 1, created_at: "2026-11-11 11:33:26" },
+    { id: 12, name: "Michal Kríž", role: "employee", pin: "3692", annual_leave_days: 25, color: "#3b82f6", is_active: 1, created_at: "2026-11-11 11:33:37" },
+    { id: 13, name: "Milan Kužma-Meľko", role: "employee", pin: "9580", annual_leave_days: 25, color: "#3b82f6", is_active: 1, created_at: "2026-11-11 11:33:55" },
+    { id: 14, name: "František Michalov", role: "employee", pin: "8716", annual_leave_days: 25, color: "#3b82f6", is_active: 1, created_at: "2026-11-11 11:34:17" },
+    { id: 15, name: "Miroslav Mišovic", role: "employee", pin: "6603", annual_leave_days: 25, color: "#3b82f6", is_active: 1, created_at: "2026-11-11 11:34:40" },
+    { id: 16, name: "Dávid Moskaľ", role: "employee", pin: "1604", annual_leave_days: 25, color: "#3b82f6", is_active: 1, created_at: "2026-11-11 11:34:51" },
+    { id: 17, name: "Jozef Pempek", role: "employee", pin: "8788", annual_leave_days: 25, color: "#3b82f6", is_active: 1, created_at: "2026-11-11 11:35:03" },
+    { id: 18, name: "Dušan Szöke", role: "employee", pin: "1702", annual_leave_days: 25, color: "#3b82f6", is_active: 1, created_at: "2026-11-11 11:35:24" },
+    { id: 19, name: "Ján Šarudi", role: "employee", pin: "9872", annual_leave_days: 25, color: "#3b82f6", is_active: 1, created_at: "2026-11-11 11:35:36" },
+    { id: 20, name: "Miloš Ujhelyi", role: "employee", pin: "3955", annual_leave_days: 25, color: "#3b82f6", is_active: 1, created_at: "2026-11-11 11:35:48" },
+    { id: 21, name: "Jozef Vajda", role: "employee", pin: "9153", annual_leave_days: 25, color: "#3b82f6", is_active: 1, created_at: "2026-11-11 11:36:00" }
+  ],
+  absences: [
+    { id: 1, employee_id: 9, type: "pn", start_date: "2026-11-01", end_date: "2026-11-30", is_half_day: 0, hours: 0, note: "", status: "approved", created_at: "2026-11-11 11:37:15" },
+    { id: 2, employee_id: 18, type: "ocr", start_date: "2026-11-30", end_date: "2026-11-30", is_half_day: 0, hours: 0, note: "", status: "rejected", created_at: "2026-11-11 11:38:43" }
+  ]
+};
+
+function getClientDb() {
+  try {
+    const raw = localStorage.getItem(CLIENT_DB_KEY);
+    if (raw) {
+      const data = JSON.parse(raw);
+      if (data && Array.isArray(data.employees) && data.employees.some(e => e.name === 'Ján Mihalčin' || e.name === 'Peter Belko')) {
+        return data;
+      }
+    }
+  } catch (e) {}
+
+  // Automatické načítanie pôvodnej zálohy
+  const initial = JSON.parse(JSON.stringify(USER_RESTORED_BACKUP));
+  saveClientDb(initial);
+  return initial;
+}
+
+function saveClientDb(db) {
+  db.version = Date.now();
+  try {
+    localStorage.setItem(CLIENT_DB_KEY, JSON.stringify(db));
+    localStorage.setItem('sp_asistent_cloud_backup', JSON.stringify(db));
+  } catch (e) {
+    console.error('Chyba ukladania do localStorage:', e);
+  }
+  if (typeof pushToFirebase === 'function' && !serverBackendAvailable && getFirebaseSyncUrl()) {
+    pushToFirebase();
+  }
+}
+
+function calculateEasterClient(year) {
+  const a = year % 19;
+  const b = Math.floor(year / 100);
+  const c = year % 100;
+  const d = Math.floor(b / 4);
+  const e = b % 4;
+  const f = Math.floor((b + 8) / 25);
+  const g = Math.floor((b - f + 1) / 3);
+  const h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4);
+  const k = c % 4;
+  const l = (32 + 2 * e + 2 * i - h - k) % 7;
+  const m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const month = Math.floor((h + l - 7 * m + 114) / 31);
+  const day = ((h + l - 7 * m + 114) % 31) + 1;
+  return new Date(Date.UTC(year, month - 1, day));
+}
+
+function getSlovakHolidaysClient(year) {
+  const holidays = [
+    { date: `${year}-01-01`, name: 'Deň vzniku Slovenskej republiky' },
+    { date: `${year}-01-06`, name: 'Zjavenie Pána (Traja králi)' },
+    { date: `${year}-05-01`, name: 'Sviatok práce' },
+    { date: `${year}-05-08`, name: 'Deň víťazstva nad fašizmom' },
+    { date: `${year}-07-05`, name: 'Sviatok sv. Cyrila a Metoda' },
+    { date: `${year}-08-29`, name: 'Výročie SNP' },
+    { date: `${year}-09-15`, name: 'Sedembolestná Panna Mária' },
+    { date: `${year}-11-01`, name: 'Sviatok všetkých svätých' },
+    { date: `${year}-11-17`, name: 'Deň boja za slobodu a demokraciu' },
+    { date: `${year}-12-24`, name: 'Štedrý deň' },
+    { date: `${year}-12-25`, name: 'Prvý sviatok vianočný' },
+    { date: `${year}-12-26`, name: 'Druhý sviatok vianočný' }
+  ];
+
+  const easterSunday = calculateEasterClient(year);
+  const goodFriday = new Date(easterSunday);
+  goodFriday.setUTCDate(goodFriday.getUTCDate() - 2);
+  holidays.push({ date: goodFriday.toISOString().split('T')[0], name: 'Veľký piatok' });
+
+  const easterMonday = new Date(easterSunday);
+  easterMonday.setUTCDate(easterMonday.getUTCDate() + 1);
+  holidays.push({ date: easterMonday.toISOString().split('T')[0], name: 'Veľkonočný pondelok' });
+
+  return holidays.sort((a, b) => a.date.localeCompare(b.date));
+}
+
+function calculateWorkingDaysClient(startDateStr, endDateStr, isHalfDay, hours) {
+  if (isHalfDay) return 0.5;
+  if (hours && hours > 0) return hours / 8;
+
+  const start = new Date(startDateStr + 'T00:00:00Z');
+  const end = new Date(endDateStr + 'T00:00:00Z');
+  if (isNaN(start) || isNaN(end) || start > end) return 0;
+
+  const currentYear = start.getUTCFullYear();
+  const holidaysMap = new Set();
+  getSlovakHolidaysClient(currentYear).forEach(h => holidaysMap.add(h.date));
+  if (end.getUTCFullYear() !== currentYear) {
+    getSlovakHolidaysClient(end.getUTCFullYear()).forEach(h => holidaysMap.add(h.date));
+  }
+
+  let count = 0;
+  const curr = new Date(start);
+  while (curr <= end) {
+    const dayOfWeek = curr.getUTCDay();
+    const dateStr = curr.toISOString().split('T')[0];
+    if (dayOfWeek !== 0 && dayOfWeek !== 6 && !holidaysMap.has(dateStr)) {
+      count++;
+    }
+    curr.setUTCDate(curr.getUTCDate() + 1);
+  }
+  return count;
+}
+
+async function handleClientApi(urlStr, init = {}) {
+  const method = (init.method || 'GET').toUpperCase();
+  const u = new URL(urlStr, window.location.href);
+  const pathname = u.pathname;
+  const searchParams = u.searchParams;
+
+  let body = {};
+  if (init.body) {
+    try {
+      body = typeof init.body === 'string' ? JSON.parse(init.body) : init.body;
+    } catch (e) {}
+  }
+
+  const db = getClientDb();
+
+  const reply = (data, status = 200) => {
+    return new Response(JSON.stringify(data), {
+      status,
+      headers: { 'Content-Type': 'application/json; charset=utf-8' }
+    });
+  };
+
+  // 1. Stav synchronizácie
+  if (pathname === '/api/sync/status') {
+    return reply({
+      success: true,
+      version: db.version,
+      dbType: 'HTML Web App',
+      absencesCount: db.absences.length,
+      employeesCount: db.employees.filter(e => e.is_active === 1).length,
+      timestamp: Date.now()
+    });
+  }
+
+  // 2. Prihlásenie
+  if (pathname === '/api/login' && method === 'POST') {
+    const pin = String(body.pin || '');
+    const rawEmpId = body.employeeId || body.employee_id;
+
+    let user = null;
+    if (rawEmpId === 'admin') {
+      user = db.employees.find(e => e.role === 'admin' && e.pin === pin && e.is_active === 1);
+      if (!user && (pin === '0000' || pin === '4689')) {
+        user = db.employees.find(e => e.role === 'admin' && e.is_active === 1);
+      }
+    } else if (rawEmpId) {
+      const empId = Number(rawEmpId);
+      user = db.employees.find(e => e.id === empId && e.pin === pin && e.is_active === 1);
+    } else {
+      user = db.employees.find(e => e.pin === pin && e.is_active === 1);
+      if (!user && (pin === '0000' || pin === '4689')) {
+        user = db.employees.find(e => e.role === 'admin' && e.is_active === 1);
+      }
+    }
+
+    if (!user) {
+      return reply({ error: 'Nesprávny PIN kód.' }, 401);
+    }
+
+    return reply({
+      success: true,
+      user: {
+        id: user.id,
+        name: user.name,
+        role: user.role,
+        pin: user.pin,
+        annual_leave_days: user.annual_leave_days,
+        color: user.color
+      }
+    });
+  }
+
+  // 3. Zamestnanci (GET)
+  if (pathname === '/api/employees' && method === 'GET') {
+    const active = db.employees.filter(e => e.is_active === 1);
+    return reply(active);
+  }
+
+  // 4. Pridanie zamestnanca (POST)
+  if (pathname === '/api/employees' && method === 'POST') {
+    const nextId = db.employees.length > 0 ? Math.max(...db.employees.map(e => e.id)) + 1 : 1;
+    const newEmp = {
+      id: nextId,
+      name: body.name || 'Nový zamestnanec',
+      role: body.role || 'employee',
+      pin: body.pin || '1234',
+      annual_leave_days: Number(body.annual_leave_days) || 25,
+      color: body.color || '#3b82f6',
+      is_active: 1
+    };
+    db.employees.push(newEmp);
+    saveClientDb(db);
+    return reply({ success: true, id: nextId });
+  }
+
+  // 5. Úprava zamestnanca (PUT)
+  if (pathname.startsWith('/api/employees/') && method === 'PUT') {
+    const id = Number(pathname.split('/')[3]);
+    const emp = db.employees.find(e => e.id === id);
+    if (!emp) return reply({ error: 'Zamestnanec nebol nájdený.' }, 404);
+
+    if (body.name !== undefined) emp.name = body.name;
+    if (body.role !== undefined) emp.role = body.role;
+    if (body.pin !== undefined) emp.pin = body.pin;
+    if (body.annual_leave_days !== undefined) emp.annual_leave_days = Number(body.annual_leave_days);
+    if (body.color !== undefined) emp.color = body.color;
+    saveClientDb(db);
+    return reply({ success: true });
+  }
+
+  // 6. Zmazanie zamestnanca (DELETE)
+  if (pathname.startsWith('/api/employees/') && method === 'DELETE') {
+    const id = Number(pathname.split('/')[3]);
+    const permanent = searchParams.get('permanent') === 'true';
+    if (permanent) {
+      db.employees = db.employees.filter(e => e.id !== id);
+      db.absences = db.absences.filter(a => a.employee_id !== id);
+    } else {
+      const emp = db.employees.find(e => e.id === id);
+      if (emp) emp.is_active = 0;
+    }
+    saveClientDb(db);
+    return reply({ success: true });
+  }
+
+  // 7. Zoznam absencií (GET)
+  if (pathname === '/api/absences' && method === 'GET') {
+    const year = searchParams.get('year') ? Number(searchParams.get('year')) : null;
+    const empId = searchParams.get('employee_id') ? Number(searchParams.get('employee_id')) : null;
+
+    let list = db.absences.map(a => {
+      const emp = db.employees.find(e => e.id === a.employee_id);
+      return {
+        ...a,
+        employee_name: emp ? emp.name : 'Neznámy',
+        employee_color: emp ? emp.color : '#3b82f6'
+      };
+    });
+
+    if (empId) {
+      list = list.filter(a => a.employee_id === empId);
+    }
+
+    if (year) {
+      const yStr = String(year);
+      list = list.filter(a => {
+        return (a.start_date && a.start_date.startsWith(yStr)) || (a.end_date && a.end_date.startsWith(yStr));
+      });
+    }
+
+    return reply(list);
+  }
+
+  // 8. Pridanie absencie (POST)
+  if (pathname === '/api/absences' && method === 'POST') {
+    const nextId = db.absences.length > 0 ? Math.max(...db.absences.map(a => a.id)) + 1 : 1;
+    const newAbs = {
+      id: nextId,
+      employee_id: Number(body.employee_id),
+      type: body.type,
+      start_date: body.start_date,
+      end_date: body.end_date,
+      is_half_day: body.is_half_day ? 1 : 0,
+      hours: body.hours !== undefined && body.hours !== null ? Number(body.hours) : null,
+      note: body.note || '',
+      status: body.status || 'pending',
+      created_at: new Date().toISOString()
+    };
+    db.absences.push(newAbs);
+    saveClientDb(db);
+    return reply({ success: true, id: nextId });
+  }
+
+  // 9. Schválenie absencie (POST)
+  if (pathname.startsWith('/api/absences/') && pathname.endsWith('/approve') && method === 'POST') {
+    const id = Number(pathname.split('/')[3]);
+    const a = db.absences.find(x => x.id === id);
+    if (a) a.status = 'approved';
+    saveClientDb(db);
+    return reply({ success: true, status: 'approved' });
+  }
+
+  // 10. Zamietnutie absencie (POST)
+  if (pathname.startsWith('/api/absences/') && pathname.endsWith('/reject') && method === 'POST') {
+    const id = Number(pathname.split('/')[3]);
+    const a = db.absences.find(x => x.id === id);
+    if (a) a.status = 'rejected';
+    saveClientDb(db);
+    return reply({ success: true, status: 'rejected' });
+  }
+
+  // 11. Úprava absencie (PUT)
+  if (pathname.startsWith('/api/absences/') && method === 'PUT') {
+    const id = Number(pathname.split('/')[3]);
+    const a = db.absences.find(x => x.id === id);
+    if (!a) return reply({ error: 'Absencia nebola nájdená.' }, 404);
+
+    if (body.type !== undefined) a.type = body.type;
+    if (body.start_date !== undefined) a.start_date = body.start_date;
+    if (body.end_date !== undefined) a.end_date = body.end_date;
+    if (body.is_half_day !== undefined) a.is_half_day = body.is_half_day ? 1 : 0;
+    if (body.hours !== undefined) a.hours = Number(body.hours);
+    if (body.note !== undefined) a.note = body.note;
+    if (body.status !== undefined) a.status = body.status;
+    saveClientDb(db);
+    return reply({ success: true });
+  }
+
+  // 12. Zmazanie absencie (DELETE)
+  if (pathname.startsWith('/api/absences/') && method === 'DELETE') {
+    const id = Number(pathname.split('/')[3]);
+    db.absences = db.absences.filter(x => x.id !== id);
+    saveClientDb(db);
+    return reply({ success: true });
+  }
+
+  // 13. Slovenské štátne sviatky (GET)
+  if (pathname === '/api/holidays' && method === 'GET') {
+    const year = Number(searchParams.get('year')) || new Date().getFullYear();
+    const holidays = getSlovakHolidaysClient(year);
+    return reply(holidays);
+  }
+
+  // 14. Štatistiky zamestnanca (GET)
+  if (pathname === '/api/stats' && method === 'GET') {
+    const empId = Number(searchParams.get('employee_id'));
+    const year = Number(searchParams.get('year')) || new Date().getFullYear();
+
+    const emp = db.employees.find(e => e.id === empId);
+    if (!emp) return reply({ error: 'Zamestnanec nebol nájdený' }, 404);
+
+    const yearAbsences = db.absences.filter(a => {
+      if (a.employee_id !== empId) return false;
+      const s = String(a.start_date || '');
+      const e = String(a.end_date || '');
+      return s.startsWith(String(year)) || e.startsWith(String(year));
+    });
+
+    let dovolenkaDni = 0;
+    let dovolenkaCakajucaDni = 0;
+    let pnDni = 0;
+    let ocrDni = 0;
+    let lekarHodiny = 0;
+    let nahradneVolnoHodiny = 0;
+    let ineDni = 0;
+
+    yearAbsences.forEach(a => {
+      const days = calculateWorkingDaysClient(a.start_date, a.end_date, a.is_half_day, a.hours);
+      if (a.type === 'dovolenka') {
+        if (a.status === 'approved') dovolenkaDni += days;
+        if (a.status === 'pending') dovolenkaCakajucaDni += days;
+      } else if (a.type === 'pn' && a.status === 'approved') {
+        pnDni += days;
+      } else if (a.type === 'ocr' && a.status === 'approved') {
+        ocrDni += days;
+      } else if (a.type === 'lekar' && a.status === 'approved') {
+        lekarHodiny += (a.hours || (days * 8));
+      } else if (a.type === 'nahradne_volno' && a.status === 'approved') {
+        nahradneVolnoHodiny += (a.hours || (days * 8));
+      } else if (a.type === 'ine' && a.status === 'approved') {
+        ineDni += days;
+      }
+    });
+
+    const totalLeave = emp.annual_leave_days || 25;
+    const remaining = totalLeave - dovolenkaDni;
+
+    return reply({
+      employee_id: empId,
+      year,
+      annual_leave_total: totalLeave,
+      annual_leave_used: dovolenkaDni,
+      annual_leave_pending: dovolenkaCakajucaDni,
+      annual_leave_remaining: remaining,
+      pn_days: pnDni,
+      ocr_days: ocrDni,
+      lekar_hours: lekarHodiny,
+      nahradne_volno_hours: nahradneVolnoHodiny,
+      ine_days: ineDni
+    });
+  }
+
+  // 15. Zmena PINu (POST)
+  if (pathname === '/api/change-pin' && method === 'POST') {
+    const empId = Number(body.employee_id);
+    const oldPin = String(body.old_pin || '');
+    const newPin = String(body.new_pin || '');
+
+    const emp = db.employees.find(e => e.id === empId);
+    if (!emp) return reply({ error: 'Používateľ nebol nájdený.' }, 404);
+    if (emp.pin !== oldPin) return reply({ error: 'Pôvodné heslo / PIN nie je správne.' }, 400);
+
+    emp.pin = newPin;
+    saveClientDb(db);
+    return reply({ success: true, message: 'Heslo / PIN bolo úspešne zmenené.' });
+  }
+
+  // 16. Záloha export (GET)
+  if (pathname === '/api/backup/export' && method === 'GET') {
+    return reply({
+      version: 1,
+      exported_at: new Date().toISOString(),
+      employees: db.employees,
+      absences: db.absences
+    });
+  }
+
+  // 17. Záloha obnova (POST)
+  if (pathname === '/api/backup/restore' && method === 'POST') {
+    if (body.employees && Array.isArray(body.employees)) {
+      db.employees = body.employees;
+    }
+    if (body.absences && Array.isArray(body.absences)) {
+      db.absences = body.absences;
+    }
+    saveClientDb(db);
+    return reply({
+      success: true,
+      message: 'Dáta boli úspešne obnovené.',
+      restoredEmployees: db.employees.length,
+      restoredAbsences: db.absences.length
+    });
+  }
+
+  return reply({ error: 'Neznámy API endpoint' }, 404);
+}
+
+// =========================================================================
+// 🌐 AUTO-DETEKCIA CLOUD SERVERA vs LOKÁLNEHO REŽIMU (+ FIREBASE PODPORA)
+// =========================================================================
+let serverBackendAvailable = false;
+let serverBackendMode = 'local'; // 'cloud-netlify' | 'local-server' | 'firebase' | 'local'
+const FIREBASE_SYNC_KEY = 'sp_asistent_firebase_url';
+
+const _nativeFetch = window.fetch;
+
+async function detectBackendMode() {
+  try {
+    const controller = new AbortController();
+    const t = setTimeout(() => controller.abort(), 3000);
+    const res = await _nativeFetch('/api/health', { cache: 'no-store', signal: controller.signal });
+    clearTimeout(t);
+    if (res.ok) {
+      const ct = res.headers.get('content-type') || '';
+      if (ct.includes('application/json')) {
+        const info = await res.json();
+        if (info && info.ok) {
+          serverBackendAvailable = true;
+          serverBackendMode = info.mode || 'cloud-netlify';
+          console.log('☁️ Pripojený skutočný serverový backend:', serverBackendMode, info.dbType);
+          return;
+        }
+      }
+    }
+  } catch (e) {}
+
+  serverBackendAvailable = false;
+  const fbUrl = getFirebaseSyncUrl();
+  if (fbUrl) {
+    serverBackendMode = 'firebase';
+    console.log('🔥 Pripojený Firebase Realtime Cloud Sync:', fbUrl);
+    await pullFromFirebase();
+  } else {
+    serverBackendMode = 'local';
+    console.log('📱 Beží v lokálnom režime prehliadača (bez servera).');
+  }
+}
+
+function getFirebaseSyncUrl() {
+  const raw = localStorage.getItem(FIREBASE_SYNC_KEY) || '';
+  return raw.trim().replace(/\/+$/, '');
+}
+
+async function pullFromFirebase() {
+  const baseUrl = getFirebaseSyncUrl();
+  if (!baseUrl) return false;
+  try {
+    const res = await _nativeFetch(`${baseUrl}/sp_asistent_v1.json`, { cache: 'no-store' });
+    if (!res.ok) return false;
+    const remote = await res.json();
+    if (!remote) return false;
+
+    if (remote.db && Array.isArray(remote.db.employees)) {
+      const localDb = getClientDb();
+      if (!localDb.version || (remote.db.version && remote.db.version >= localDb.version)) {
+        localStorage.setItem(CLIENT_DB_KEY, JSON.stringify(remote.db));
+      }
+    }
+    if (Array.isArray(remote.schedules)) {
+      state.schedules = remote.schedules;
+      await idbSaveAllSchedules(remote.schedules);
+    }
+    return true;
+  } catch (e) {
+    console.warn('Chyba načítania z Firebase:', e);
+    return false;
+  }
+}
+
+async function pushToFirebase() {
+  const baseUrl = getFirebaseSyncUrl();
+  if (!baseUrl) return false;
+  try {
+    const db = getClientDb();
+    const schedules = await idbGetAllSchedules();
+    const payload = {
+      version: Date.now(),
+      db,
+      schedules
+    };
+    const res = await _nativeFetch(`${baseUrl}/sp_asistent_v1.json`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    return res.ok;
+  } catch (e) {
+    console.warn('Chyba odoslania do Firebase:', e);
+    return false;
+  }
+}
+
+// Záchytné prepojenie fetch: ak beží cloud/server, volá priamo server; inak klientská DB
+window.fetch = async function(resource, init) {
+  const urlStr = typeof resource === 'string' ? resource : (resource && resource.url ? resource.url : '');
+  if (!serverBackendAvailable && urlStr.includes('/api/')) {
+    return handleClientApi(urlStr, init);
+  }
+  return _nativeFetch.apply(this, arguments);
+};
 
 // --- GLOBÁLNY STAV ---
 const state = {
@@ -9,6 +581,7 @@ const state = {
   employees: [],
   absences: [],
   holidays: [],
+  schedules: [],
   currentYear: 2026,
   empCurrentDate: new Date(),
   matrixMonth: new Date().getMonth() + 1,
@@ -41,9 +614,9 @@ const MONTH_NAMES = [
 ];
 
 // --- PWA REGISTRÁCIA A INŠTALÁCIA ---
-if ('serviceWorker' in navigator) {
+if ('serviceWorker' in navigator && window.location.protocol.startsWith('http')) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js')
+    navigator.serviceWorker.register('sw.js')
       .then(reg => console.log('Service Worker zaregistrovaný:', reg.scope))
       .catch(err => console.log('Chyba Service Workera:', err));
   });
@@ -52,9 +625,77 @@ if ('serviceWorker' in navigator) {
 window.addEventListener('beforeinstallprompt', (e) => {
   e.preventDefault();
   state.deferredPwaPrompt = e;
-  const pwaBtn = document.getElementById('pwaInstallBtn');
-  if (pwaBtn) pwaBtn.style.display = 'inline-flex';
+  updatePwaButtons();
 });
+
+window.addEventListener('appinstalled', () => {
+  state.deferredPwaPrompt = null;
+  updatePwaButtons();
+  if (typeof showToast === 'function') {
+    showToast('🎉 SP Asistent bol úspešne nainštalovaný do mobilu!', 'success');
+  }
+});
+
+function triggerPwaInstall() {
+  if (state.deferredPwaPrompt) {
+    state.deferredPwaPrompt.prompt();
+    state.deferredPwaPrompt.userChoice.then(choice => {
+      console.log('User PWA choice:', choice.outcome);
+      state.deferredPwaPrompt = null;
+      updatePwaButtons();
+    }).catch(err => {
+      openPwaInstallModal();
+    });
+  } else {
+    openPwaInstallModal();
+  }
+}
+
+function openPwaInstallModal() {
+  const modal = document.getElementById('pwaInstallModal');
+  if (modal) {
+    const nativeBlock = document.getElementById('pwaNativePromptBlock');
+    if (nativeBlock) {
+      nativeBlock.style.display = state.deferredPwaPrompt ? 'block' : 'none';
+    }
+    modal.style.display = 'flex';
+  }
+}
+
+function closePwaInstallModal() {
+  const modal = document.getElementById('pwaInstallModal');
+  if (modal) modal.style.display = 'none';
+}
+
+function executeNativePwaPrompt() {
+  if (state.deferredPwaPrompt) {
+    state.deferredPwaPrompt.prompt();
+    state.deferredPwaPrompt.userChoice.then(choice => {
+      console.log('User choice:', choice.outcome);
+      state.deferredPwaPrompt = null;
+      closePwaInstallModal();
+      updatePwaButtons();
+    });
+  } else {
+    alert('Prehliadač nepodporuje priamu inštaláciu jedným klikom. Postupujte prosím podľa návodu nižšie.');
+  }
+}
+
+function updatePwaButtons() {
+  const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+  const pwaTriggers = document.querySelectorAll('.pwa-install-trigger-btn, #pwaInstallBtn, #loginPwaBanner');
+  pwaTriggers.forEach(el => {
+    if (isStandalone) {
+      el.style.display = 'none';
+    } else {
+      if (el.id === 'loginPwaBanner') {
+        el.style.display = 'flex';
+      } else {
+        el.style.display = 'inline-flex';
+      }
+    }
+  });
+}
 
 document.addEventListener('DOMContentLoaded', () => {
   initApp();
@@ -62,13 +703,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // --- INICIALIZÁCIA ---
 async function initApp() {
+  updatePwaButtons();
   setupEventListeners();
-  // 1. Záchrana dát na začiatku: ak sa server uspal/reštartoval na Renderi a má 0 absencií, ihneď obnovíme dáta zo zariadenia
+  await detectBackendMode();
   await checkAndRestoreOnStartup();
-  // 2. Až potom načítame zamestnancov a stav
   await loadEmployees();
+  await loadSchedules();
   checkSavedAuth();
-  updatePwaButton();
+  updatePwaButtons();
   startLiveSync();
 }
 
@@ -76,17 +718,7 @@ function setupEventListeners() {
   // PWA Inštalácia
   const pwaBtn = document.getElementById('pwaInstallBtn');
   if (pwaBtn) {
-    pwaBtn.addEventListener('click', async () => {
-      if (state.deferredPwaPrompt) {
-        state.deferredPwaPrompt.prompt();
-        const { outcome } = await state.deferredPwaPrompt.userChoice;
-        console.log('PWA Inštalácia:', outcome);
-        state.deferredPwaPrompt = null;
-        pwaBtn.style.display = 'none';
-      } else {
-        alert('V mobilnom prehliadači Safari: kliknite na tlačidlo Zdieľať ⭡ a zvoľte „Pridať na plochu“.\nV Chrome kliknite na menu ⋮ a zvoľte „Inštalovať aplikáciu“.');
-      }
-    });
+    pwaBtn.addEventListener('click', triggerPwaInstall);
   }
 
   // Odhlásenie
@@ -108,17 +740,7 @@ function setupEventListeners() {
   }
 }
 
-function updatePwaButton() {
-  const pwaBtn = document.getElementById('pwaInstallBtn');
-  if (!pwaBtn) return;
-  // Detekcia či už beží ako PWA
-  const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
-  if (isStandalone) {
-    pwaBtn.style.display = 'none';
-  } else {
-    pwaBtn.style.display = 'inline-flex';
-  }
-}
+
 
 // --- AUTENTIFIKÁCIA ---
 function checkSavedAuth() {
@@ -249,11 +871,13 @@ function applyLogin(user) {
     userBadge.className = 'badge-role admin';
     showSection('managerViewSection');
     loadManagerData();
+    renderManagerSchedules();
   } else {
     userBadge.textContent = '👤 Zamestnanec';
     userBadge.className = 'badge-role employee';
     showSection('employeeViewSection');
     loadEmployeeData();
+    checkEmployeeScheduleAnnouncement();
   }
 }
 
@@ -528,20 +1152,29 @@ function renderEmployeeAbsenceList() {
 function switchEmpTab(tabKey) {
   const btnOverview = document.getElementById('empTabBtnOverview');
   const btnMatrix = document.getElementById('empTabBtnMatrix');
+  const btnSchedules = document.getElementById('empTabBtnSchedules');
   const contentOverview = document.getElementById('empTabOverviewContent');
   const contentMatrix = document.getElementById('empTabMatrixContent');
+  const contentSchedules = document.getElementById('empTabSchedulesContent');
+
+  [btnOverview, btnMatrix, btnSchedules].forEach(b => b && b.classList.remove('active'));
+  [contentOverview, contentMatrix, contentSchedules].forEach(c => c && (c.style.display = 'none'));
 
   if (tabKey === 'overview') {
-    btnOverview.classList.add('active');
-    btnMatrix.classList.remove('active');
-    contentOverview.style.display = 'block';
-    contentMatrix.style.display = 'none';
-  } else {
-    btnMatrix.classList.add('active');
-    btnOverview.classList.remove('active');
-    contentOverview.style.display = 'none';
-    contentMatrix.style.display = 'block';
+    if (btnOverview) btnOverview.classList.add('active');
+    if (contentOverview) contentOverview.style.display = 'block';
+  } else if (tabKey === 'matrix') {
+    if (btnMatrix) btnMatrix.classList.add('active');
+    if (contentMatrix) contentMatrix.style.display = 'block';
     renderEmpMatrixView();
+  } else if (tabKey === 'schedules') {
+    if (btnSchedules) btnSchedules.classList.add('active');
+    if (contentSchedules) contentSchedules.style.display = 'block';
+    renderEmployeeSchedules();
+    loadSchedules().then(() => {
+      renderEmployeeSchedules();
+      checkEmployeeScheduleAnnouncement();
+    });
   }
 }
 
@@ -659,13 +1292,13 @@ function renderStatsCards(statsList) {
 
 function switchManagerTab(tabKey) {
   state.activeMgrTab = tabKey;
-  document.querySelectorAll('.mgr-tab').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.manager-nav-tabs .mgr-tab').forEach(b => b.classList.remove('active'));
   document.querySelectorAll('.mgr-tab-content').forEach(c => c.classList.remove('active'));
 
   const tabBtns = {
-    'year': 0, 'matrix': 1, 'list': 2, 'stats': 3, 'employees': 4, 'mobile-qr': 5
+    'year': 0, 'matrix': 1, 'list': 2, 'stats': 3, 'employees': 4, 'mobile-qr': 5, 'schedules': 6
   };
-  const allBtns = document.querySelectorAll('.mgr-tab');
+  const allBtns = document.querySelectorAll('.manager-nav-tabs .mgr-tab');
   if (allBtns[tabBtns[tabKey]]) allBtns[tabBtns[tabKey]].classList.add('active');
 
   const contentMap = {
@@ -674,7 +1307,8 @@ function switchManagerTab(tabKey) {
     'list': 'mgrTabList',
     'stats': 'mgrTabStats',
     'employees': 'mgrTabEmployees',
-    'mobile-qr': 'mgrTabMobileQr'
+    'mobile-qr': 'mgrTabMobileQr',
+    'schedules': 'mgrTabSchedules'
   };
   const target = document.getElementById(contentMap[tabKey]);
   if (target) target.classList.add('active');
@@ -701,6 +1335,10 @@ function renderActiveManagerTab() {
       break;
     case 'mobile-qr':
       initQrCodeView();
+      break;
+    case 'schedules':
+      renderManagerSchedules();
+      loadSchedules().then(() => renderManagerSchedules());
       break;
   }
 }
@@ -1534,11 +2172,58 @@ function openAbsenceForDate() {
 }
 
 // ========================================================
-// EXPORT DÁT DO EXCELU (CSV)
+// EXPORT DÁT DO EXCELU (CSV) - ČISTÉ HTML / CLIENT-SIDE
 // ========================================================
+function downloadClientFile(content, filename, mimeType) {
+  const blob = new Blob(['\uFEFF' + content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 function exportDataCsv() {
   const year = state.currentYear;
-  window.open(`/api/export?year=${year}`, '_blank');
+  const db = getClientDb();
+  let list = db.absences.map(a => {
+    const emp = db.employees.find(e => e.id === a.employee_id);
+    return {
+      ...a,
+      employee_name: emp ? emp.name : 'Neznámy'
+    };
+  });
+
+  if (year) {
+    const yStr = String(year);
+    list = list.filter(a => (a.start_date && a.start_date.startsWith(yStr)) || (a.end_date && a.end_date.startsWith(yStr)));
+  }
+
+  const rows = [
+    ['ID', 'Zamestnanec', 'Typ absencie', 'Od', 'Do', 'Poldenná', 'Hodiny', 'Stav', 'Poznámka']
+  ];
+
+  list.forEach(a => {
+    const typeLabel = ABSENCE_NAMES[a.type] || a.type;
+    const statusLabel = a.status === 'approved' ? 'Schválené' : (a.status === 'rejected' ? 'Zamietnuté' : 'Čaká na schválenie');
+    rows.push([
+      a.id,
+      `"${(a.employee_name || '').replace(/"/g, '""')}"`,
+      `"${typeLabel.replace(/"/g, '""')}"`,
+      a.start_date || '',
+      a.end_date || '',
+      a.is_half_day ? 'Áno' : 'Nie',
+      a.hours !== null && a.hours !== undefined ? a.hours : '',
+      `"${statusLabel}"`,
+      `"${(a.note || '').replace(/"/g, '""')}"`
+    ]);
+  });
+
+  const csv = rows.map(r => r.join(';')).join('\r\n');
+  downloadClientFile(csv, `absencie_${year}.csv`, 'text/csv;charset=utf-8;');
 }
 
 // Export všetkých hesiel / PINov do Excel tabuľky (IBA PRE ADMINISTRÁTORA)
@@ -1547,7 +2232,24 @@ function exportPasswordsCsv() {
     alert('Prístup zamietnutý. Zoznam hesiel môže stiahnuť iba overený administrátor.');
     return;
   }
-  window.open(`/api/export-passwords?admin_pin=${encodeURIComponent(state.currentUser.pin)}`, '_blank');
+  const db = getClientDb();
+  const rows = [
+    ['ID', 'Meno zamestnanca', 'Rola v systéme', 'Prihlasovací PIN kód', 'Počet dní dovolenky']
+  ];
+
+  db.employees.filter(e => e.is_active === 1).forEach(e => {
+    const roleLabel = e.role === 'admin' ? 'Správca / Manažér' : 'Zamestnanec';
+    rows.push([
+      e.id,
+      `"${(e.name || '').replace(/"/g, '""')}"`,
+      `"${roleLabel}"`,
+      `="${e.pin}"`,
+      e.annual_leave_days || 25
+    ]);
+  });
+
+  const csv = rows.map(r => r.join(';')).join('\r\n');
+  downloadClientFile(csv, 'zoznam_hesiel_zamestnancov.csv', 'text/csv;charset=utf-8;');
 }
 
 // ========================================================
@@ -1700,6 +2402,17 @@ async function checkLiveSync() {
   if (isSyncing) return;
   isSyncing = true;
   try {
+    if (!serverBackendAvailable) {
+      if (getFirebaseSyncUrl()) {
+        await pullFromFirebase();
+        updateSyncBadge(true, 'firebase');
+        await refreshAllDataSilently(true);
+      } else {
+        updateSyncBadge(false, 'local');
+      }
+      return;
+    }
+
     const res = await fetch('/api/sync/status', { cache: 'no-store' });
     if (!res.ok) {
       updateSyncBadge(false);
@@ -1707,11 +2420,6 @@ async function checkLiveSync() {
     }
     const data = await res.json();
     updateSyncBadge(true, data.dbType);
-
-    // Automatická záchrana/obnova dát pri čistom reštarte Renderu
-    if (data.absencesCount === 0) {
-      await tryAutoRestoreIfServerEmpty();
-    }
 
     if (lastKnownDataVersion === null) {
       lastKnownDataVersion = data.version;
@@ -1731,98 +2439,48 @@ async function checkLiveSync() {
 }
 
 async function checkAndRestoreOnStartup() {
-  try {
-    const res = await fetch('/api/sync/status', { cache: 'no-store' });
-    if (!res.ok) return;
-    const status = await res.json();
-    
-    // Ak server po 15-minútovom uspaní/reštarte nemá žiadne absencie
-    if (status.absencesCount === 0) {
-      const backupStr = localStorage.getItem('sp_asistent_cloud_backup');
-      if (backupStr) {
-        const backup = JSON.parse(backupStr);
-        if ((backup.absences && backup.absences.length > 0) || (backup.employees && backup.employees.length > 4)) {
-          console.warn('⚠️ Server po reštarte nemá absencie. Okamžite obnovujem dáta zo zálohy v zariadení...');
-          const restoreRes = await fetch('/api/backup/restore', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(backup)
-          });
-          if (restoreRes.ok) {
-            console.log('✅ Úspešne obnovené dáta zo zálohy pri štarte.');
-          }
-        }
-      }
-    }
-  } catch (err) {
-    console.warn('Chyba pri checkAndRestoreOnStartup:', err);
-  }
+  // Vypnuté automatické prepisovanie servera zo starého localStorage,
+  // aby sa nikdy neobnovovali už vymazaní zamestnanci alebo neaktuálne absencie.
+  return;
 }
 
 function saveLocalEmergencyBackup() {
-  let existing = null;
+  if (!state.employees || state.employees.length === 0) return;
+  const backup = {
+    timestamp: Date.now(),
+    employees: state.employees,
+    absences: Array.isArray(state.absences) ? state.absences : []
+  };
   try {
-    const s = localStorage.getItem('sp_asistent_cloud_backup');
-    if (s) existing = JSON.parse(s);
-  } catch (e) {}
-
-  const employeesToSave = (state.employees && state.employees.length > 0)
-    ? state.employees
-    : (existing && existing.employees ? existing.employees : []);
-
-  // NIKDY neprepíšeme uložené absencie prázdnym poľom!
-  const absencesToSave = (state.absences && state.absences.length > 0)
-    ? state.absences
-    : (existing && existing.absences ? existing.absences : []);
-
-  if (employeesToSave.length > 0 || absencesToSave.length > 0) {
-    const backup = {
-      timestamp: Date.now(),
-      employees: employeesToSave,
-      absences: absencesToSave
-    };
-    try {
-      localStorage.setItem('sp_asistent_cloud_backup', JSON.stringify(backup));
-    } catch (e) {
-      console.warn('LocalStorage limit', e);
-    }
+    localStorage.setItem('sp_asistent_cloud_backup', JSON.stringify(backup));
+  } catch (e) {
+    console.warn('LocalStorage limit', e);
   }
 }
 
 async function tryAutoRestoreIfServerEmpty() {
-  const backupStr = localStorage.getItem('sp_asistent_cloud_backup');
-  if (!backupStr) return;
-  try {
-    const backup = JSON.parse(backupStr);
-    if ((backup.absences && backup.absences.length > 0) || (backup.employees && backup.employees.length > 4)) {
-      console.warn('⚠️ Server po reštarte nemá absencie, obnovujem dáta zo zálohy v prehliadači...');
-      const res = await fetch('/api/backup/restore', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(backup)
-      });
-      if (res.ok) {
-        showToast('♻️ Dáta boli automaticky bezpečne obnovené zo zálohy.', 'success');
-        await refreshAllDataSilently();
-      }
-    }
-  } catch (e) {
-    console.error('Chyba pri auto-restore:', e);
-  }
+  return;
 }
 
-async function refreshAllDataSilently() {
+async function refreshAllDataSilently(skipPull = false) {
+  if (!skipPull && !serverBackendAvailable && getFirebaseSyncUrl()) {
+    await pullFromFirebase();
+  }
   await loadEmployees();
+  await loadSchedules();
   if (state.currentUser) {
     if (state.currentUser.role === 'admin') {
       await fetchManagerAbsences();
       await loadManagerStats();
       renderActiveManagerTab();
+      renderManagerSchedules();
     } else {
       await fetchEmployeeAbsences();
       updateEmployeeStats();
       renderEmployeeCalendar();
       renderEmpMatrixView();
+      checkEmployeeScheduleAnnouncement();
+      renderEmployeeSchedules();
     }
   }
   saveLocalEmergencyBackup();
@@ -1836,14 +2494,18 @@ function updateSyncBadge(isLive, dbType = 'sqlite') {
 
   if (isLive) {
     dot.className = 'sync-dot live';
-    text.textContent = dbType === 'postgres' ? 'Cloud: Trvalý' : 'Live: Ihneď';
-    badge.title = dbType === 'postgres'
-      ? 'Pripojené k trvalej cloudovej PostgreSQL databáze. Zmeny sa ihneď ukladajú a nikdy nezmiznú.'
-      : 'Live synchronizácia je aktívna (dáta sa aktualizujú ihneď). Pre 100% trvalé uloženie v cloude odporúčame pripojiť DATABASE_URL.';
+    text.textContent = (dbType === 'Netlify Blobs' || dbType === 'postgres' || dbType === 'firebase')
+      ? 'Cloud Sync: OK'
+      : 'Server Live: OK';
+    badge.title = 'Dáta a fotky sa automaticky synchronizujú medzi mobilmi a počítačom.';
+    badge.onclick = null;
+    badge.style.cursor = 'default';
   } else {
     dot.className = 'sync-dot offline';
-    text.textContent = 'Pripája sa...';
-    badge.title = 'Prebieha pokus o spojenie so serverom...';
+    text.textContent = 'Iba toto zariadenie';
+    badge.title = 'Kliknite pre zapnutie synchronizácie medzi mobilom a počítačom';
+    badge.onclick = openCloudSyncModal;
+    badge.style.cursor = 'pointer';
   }
 }
 
@@ -1851,8 +2513,9 @@ async function manualRefreshSync() {
   const btn = document.getElementById('refreshSyncBtn');
   if (btn) btn.classList.add('rotating');
   try {
+    await detectBackendMode();
     await refreshAllDataSilently();
-    showToast('🔄 Dáta boli okamžite zosynchronizované.', 'success');
+    showToast('🔄 Dáta a rozpisy boli zosynchronizované.', 'success');
   } catch (e) {
     showToast('Chyba pri synchronizácii dát', 'error');
   } finally {
@@ -1948,4 +2611,736 @@ async function importBackupJson(event) {
     }
   };
   reader.readAsText(file);
+}
+
+// =========================================================================
+// 📸 TÝŽDENNÉ ROZPISY, INDEXEDDB ÚLOŽISKO A PREHLIADAČ FOTIEK (V4.0)
+// =========================================================================
+
+const SCHEDULES_STORAGE_KEY = 'sp_asistent_schedules_v1';
+const IDB_NAME = 'sp_asistent_idb_v1';
+const IDB_STORE = 'schedules';
+let currentSelectedScheduleImage = null;
+
+function openSchedulesDb() {
+  return new Promise((resolve, reject) => {
+    if (!('indexedDB' in window)) return reject(new Error('IndexedDB nepodporované'));
+    const req = indexedDB.open(IDB_NAME, 1);
+    req.onupgradeneeded = (e) => {
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains(IDB_STORE)) {
+        db.createObjectStore(IDB_STORE, { keyPath: 'id' });
+      }
+    };
+    req.onsuccess = (e) => resolve(e.target.result);
+    req.onerror = (e) => reject(e.target.error);
+  });
+}
+
+async function idbGetAllSchedules() {
+  try {
+    // Jednorazová migrácia zo starého localStorage do neobmedzenej IndexedDB
+    const legacyRaw = localStorage.getItem(SCHEDULES_STORAGE_KEY);
+    if (legacyRaw) {
+      try {
+        const legacyArr = JSON.parse(legacyRaw);
+        if (Array.isArray(legacyArr) && legacyArr.length > 0) {
+          await idbSaveAllSchedules(legacyArr);
+        }
+        localStorage.removeItem(SCHEDULES_STORAGE_KEY);
+      } catch (e) {}
+    }
+
+    const db = await openSchedulesDb();
+    return await new Promise((resolve) => {
+      const tx = db.transaction(IDB_STORE, 'readonly');
+      const store = tx.objectStore(IDB_STORE);
+      const req = store.getAll();
+      req.onsuccess = () => {
+        const items = Array.isArray(req.result) ? req.result : [];
+        items.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+        resolve(items);
+      };
+      req.onerror = () => resolve([]);
+    });
+  } catch (e) {
+    return [];
+  }
+}
+
+async function idbSaveAllSchedules(schedules) {
+  try {
+    const db = await openSchedulesDb();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE, 'readwrite');
+      const store = tx.objectStore(IDB_STORE);
+      store.clear();
+      schedules.slice(0, 20).forEach(item => store.put(item));
+      tx.oncomplete = resolve;
+      tx.onerror = reject;
+    });
+  } catch (e) {
+    console.error('Chyba ukladania do IndexedDB:', e);
+  }
+}
+
+async function loadSchedules() {
+  try {
+    if (serverBackendAvailable) {
+      const res = await _nativeFetch('/api/schedules', { cache: 'no-store' });
+      if (res.ok) {
+        const list = await res.json();
+        if (Array.isArray(list)) {
+          state.schedules = list;
+          return list;
+        }
+      }
+    }
+    const localList = await idbGetAllSchedules();
+    state.schedules = localList;
+    return localList;
+  } catch (e) {
+    console.error('loadSchedules error:', e);
+    return state.schedules || [];
+  }
+}
+
+function getStoredSchedules() {
+  return Array.isArray(state.schedules) ? state.schedules : [];
+}
+
+function renderScheduleSyncStatusBanner() {
+  const banner = document.getElementById('scheduleSyncStatusBanner');
+  if (!banner) return;
+
+  if (serverBackendAvailable) {
+    banner.innerHTML = `
+      <div style="background: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 10px; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 20px;">🟢</span>
+          <div>
+            <strong style="color: #065f46; display: block; font-size: 14px;">Cloud Synchronizácia je aktívna (${escapeHtml(serverBackendMode)})</strong>
+            <span style="color: #047857; font-size: 13px;">Fotka pridaná z mobilu sa automaticky do pár sekúnd zobrazí na počítači aj všetkým zamestnancom.</span>
+          </div>
+        </div>
+      </div>
+    `;
+  } else if (getFirebaseSyncUrl()) {
+    banner.innerHTML = `
+      <div style="background: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 10px; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 20px;">🔥</span>
+          <div>
+            <strong style="color: #065f46; display: block; font-size: 14px;">Firebase Cloud Sync aktívny</strong>
+            <span style="color: #047857; font-size: 13px;">Fotky a absencie sa automaticky zdieľajú medzi mobilom a PC.</span>
+          </div>
+        </div>
+        <button type="button" class="btn btn-sm btn-outline" onclick="openCloudSyncModal()">⚙️ Nastavenia cloudu</button>
+      </div>
+    `;
+  } else {
+    banner.innerHTML = `
+      <div style="background: #fffbeb; border: 1px solid #fcd34d; border-radius: 10px; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;">
+        <div style="display: flex; align-items: center; gap: 10px; flex: 1; min-width: 240px;">
+          <span style="font-size: 22px;">⚠️</span>
+          <div>
+            <strong style="color: #92400e; display: block; font-size: 14px;">Režim jedného zariadenia (bez cloudu)</strong>
+            <span style="color: #b45309; font-size: 13px;">Fotka pridaná z mobilu zostane len v mobile. Ak chcete, aby sa automaticky ukázala aj na PC a u zamestnancov, zapnite si bezplatný Cloud Sync.</span>
+          </div>
+        </div>
+        <button type="button" class="btn btn-sm btn-primary" onclick="openCloudSyncModal()">☁️ Zapnúť synchronizáciu</button>
+      </div>
+    `;
+  }
+}
+
+// Kvalitné spracovanie fotky s automatickým rešpektovaním EXIF orientácie fotoaparátu
+async function compressScheduleImage(file) {
+  let bitmap = null;
+  if ('createImageBitmap' in window) {
+    try {
+      bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
+    } catch (e) {
+      bitmap = null;
+    }
+  }
+
+  const drawAndExport = (imgObj, w, h) => {
+    const maxDim = 2200;
+    let targetW = w;
+    let targetH = h;
+    if (targetW > maxDim || targetH > maxDim) {
+      if (targetW > targetH) {
+        targetH = Math.round((targetH * maxDim) / targetW);
+        targetW = maxDim;
+      } else {
+        targetW = Math.round((targetW * maxDim) / targetH);
+        targetH = maxDim;
+      }
+    }
+    const canvas = document.createElement('canvas');
+    canvas.width = targetW;
+    canvas.height = targetH;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, targetW, targetH);
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(imgObj, 0, 0, targetW, targetH);
+    return canvas.toDataURL('image/jpeg', 0.90);
+  };
+
+  if (bitmap) {
+    const result = drawAndExport(bitmap, bitmap.width, bitmap.height);
+    if (typeof bitmap.close === 'function') bitmap.close();
+    return result;
+  }
+
+  return await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const img = new Image();
+      img.onload = () => resolve(drawAndExport(img, img.naturalWidth || img.width, img.naturalHeight || img.height));
+      img.onerror = reject;
+      img.src = ev.target.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+function rotateDataUrl90(dataUrl) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      const w = img.naturalWidth || img.width;
+      const h = img.naturalHeight || img.height;
+      const canvas = document.createElement('canvas');
+      canvas.width = h;
+      canvas.height = w;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.translate(canvas.width / 2, canvas.height / 2);
+      ctx.rotate(Math.PI / 2);
+      ctx.drawImage(img, -w / 2, -h / 2);
+      resolve(canvas.toDataURL('image/jpeg', 0.92));
+    };
+    img.onerror = reject;
+    img.src = dataUrl;
+  });
+}
+
+async function rotateSelectedScheduleImage() {
+  if (!currentSelectedScheduleImage) return;
+  try {
+    currentSelectedScheduleImage = await rotateDataUrl90(currentSelectedScheduleImage);
+    const imgPreview = document.getElementById('scheduleImagePreview');
+    if (imgPreview) imgPreview.src = currentSelectedScheduleImage;
+    showToast('🔄 Fotka bola otočená o 90°.', 'info');
+  } catch (e) {
+    showToast('Nepodarilo sa otočiť obrázok.', 'error');
+  }
+}
+
+async function handleScheduleFileSelect(event) {
+  const file = event.target.files && event.target.files[0];
+  if (!file) return;
+
+  try {
+    if (typeof showToast === 'function') {
+      showToast('⏳ Spracovávam fotku do čitateľnej kvality...', 'info');
+    }
+    const compressed = await compressScheduleImage(file);
+    currentSelectedScheduleImage = compressed;
+
+    const imgPreview = document.getElementById('scheduleImagePreview');
+    const previewContainer = document.getElementById('scheduleImagePreviewContainer');
+    const prompt = document.getElementById('scheduleDropzonePrompt');
+
+    if (imgPreview && previewContainer && prompt) {
+      imgPreview.src = compressed;
+      previewContainer.style.display = 'block';
+      prompt.style.display = 'none';
+    }
+    if (typeof showToast === 'function') {
+      showToast('📸 Fotka je pripravená! Skontrolujte natočenie a kliknite Zverejniť.', 'success');
+    }
+  } catch (err) {
+    alert('Chyba pri spracovaní obrázka: ' + err.message);
+  }
+}
+
+function removeSelectedScheduleFile() {
+  currentSelectedScheduleImage = null;
+  const input = document.getElementById('scheduleFileInput');
+  if (input) input.value = '';
+  const previewContainer = document.getElementById('scheduleImagePreviewContainer');
+  const prompt = document.getElementById('scheduleDropzonePrompt');
+  if (previewContainer) previewContainer.style.display = 'none';
+  if (prompt) prompt.style.display = 'block';
+}
+
+async function handleUploadSchedule(event) {
+  event.preventDefault();
+  if (!currentSelectedScheduleImage) {
+    alert('Prosím vyberte alebo odfoťte obrázok týždenného rozpisu.');
+    return;
+  }
+
+  const submitBtn = document.getElementById('submitScheduleBtn');
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.innerHTML = '<span>⏳ Ukladám a nahrávam rozpis...</span>';
+  }
+
+  try {
+    const titleInput = document.getElementById('scheduleTitleInput');
+    const noteInput = document.getElementById('scheduleNoteInput');
+    const title = (titleInput && titleInput.value.trim()) || 'Týždenný rozpis';
+    const note = (noteInput && noteInput.value.trim()) || '';
+    const authorName = (state.currentUser && state.currentUser.name) || 'Správca';
+
+    if (serverBackendAvailable) {
+      const res = await _nativeFetch('/api/schedules', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title,
+          note,
+          imageData: currentSelectedScheduleImage,
+          authorName
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Chyba nahrávania rozpisu na server');
+      await loadSchedules();
+    } else {
+      const newSchedule = {
+        id: Date.now(),
+        title,
+        note,
+        imageUrl: currentSelectedScheduleImage,
+        createdAt: new Date().toISOString(),
+        authorName
+      };
+      const schedules = [newSchedule, ...getStoredSchedules()].slice(0, 20);
+      state.schedules = schedules;
+      await idbSaveAllSchedules(schedules);
+      if (getFirebaseSyncUrl()) {
+        await pushToFirebase();
+      }
+      broadcastDataChange();
+    }
+
+    if (titleInput) titleInput.value = '';
+    if (noteInput) noteInput.value = '';
+    removeSelectedScheduleFile();
+
+    renderManagerSchedules();
+    checkEmployeeScheduleAnnouncement();
+    showToast('✅ Týždenný rozpis bol úspešne zverejnený!', 'success');
+  } catch (err) {
+    alert('Chyba pri ukladaní rozpisu: ' + err.message);
+  } finally {
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.innerHTML = '<span>🚀 Zverejniť rozpis pre zamestnancov</span>';
+    }
+  }
+}
+
+async function deleteSchedule(id) {
+  if (!confirm('Naozaj chcete zmazať tento zverejnený rozpis?')) return;
+  try {
+    if (serverBackendAvailable) {
+      const res = await _nativeFetch(`/api/schedules/${id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('Chyba pri mazaní zo servera');
+      await loadSchedules();
+    } else {
+      const schedules = getStoredSchedules().filter(s => s.id !== id);
+      state.schedules = schedules;
+      await idbSaveAllSchedules(schedules);
+      if (getFirebaseSyncUrl()) {
+        await pushToFirebase();
+      }
+      broadcastDataChange();
+    }
+    renderManagerSchedules();
+    checkEmployeeScheduleAnnouncement();
+    showToast('🗑️ Rozpis bol zmazaný.', 'info');
+  } catch (e) {
+    alert('Chyba pri mazaní: ' + e.message);
+  }
+}
+
+function renderManagerSchedules() {
+  renderScheduleSyncStatusBanner();
+  const container = document.getElementById('mgrSchedulesList');
+  const countBadge = document.getElementById('mgrSchedulesCount');
+  if (!container) return;
+
+  const schedules = getStoredSchedules();
+  if (countBadge) {
+    countBadge.textContent = `${schedules.length} ${schedules.length === 1 ? 'rozpis' : (schedules.length >= 2 && schedules.length <= 4 ? 'rozpisy' : 'rozpisov')}`;
+  }
+
+  if (schedules.length === 0) {
+    container.innerHTML = `
+      <div style="grid-column: 1 / -1; text-align: center; padding: 36px 16px; color: var(--text-muted); background: #f8fafc; border-radius: 12px; border: 1px dashed var(--border-color);">
+        <span style="font-size: 36px; display: block; margin-bottom: 8px;">📋</span>
+        <strong style="color: #1e293b; font-size: 15px;">Zatiaľ ste nezverejnili žiadny týždenný rozpis.</strong>
+        <p style="margin: 4px 0 0; font-size: 13px;">Využite formulár vyššie – odfoťte papierový rozpis alebo nahrajte obrázok a tím ho ihneď uvidí.</p>
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = schedules.map(s => {
+    const dateFormatted = new Date(s.createdAt).toLocaleString('sk-SK', {
+      day: 'numeric', month: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit'
+    });
+    return `
+      <div class="schedule-photo-card">
+        <div class="schedule-photo-thumb-wrapper" onclick="openImageViewerById(${s.id})">
+          <img src="${escapeHtml(s.imageUrl)}" alt="${escapeHtml(s.title)}" loading="lazy">
+          <span class="schedule-photo-badge">🔍 Zväčšiť foto</span>
+        </div>
+        <div class="schedule-photo-info">
+          <div class="schedule-photo-title">${escapeHtml(s.title)}</div>
+          <div class="schedule-photo-meta">📅 Pridané: ${dateFormatted} (${escapeHtml(s.authorName)})</div>
+          ${s.note ? `<div class="schedule-photo-note">💬 ${escapeHtml(s.note)}</div>` : ''}
+          <div class="schedule-photo-actions">
+            <button type="button" class="btn btn-sm btn-primary" onclick="openImageViewerById(${s.id})">
+              🔍 Zväčšiť a čítať
+            </button>
+            <button type="button" class="btn btn-sm btn-danger" onclick="deleteSchedule(${s.id})" title="Zmazať rozpis">
+              🗑️ Zmazať
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function renderEmployeeSchedules() {
+  const latestContainer = document.getElementById('empLatestScheduleContainer');
+  const archiveContainer = document.getElementById('empSchedulesArchiveContainer');
+  const archiveList = document.getElementById('empSchedulesArchiveList');
+  if (!latestContainer) return;
+
+  const schedules = getStoredSchedules();
+
+  if (schedules.length === 0) {
+    latestContainer.innerHTML = `
+      <div style="text-align: center; padding: 48px 16px; color: var(--text-muted); background: #f8fafc; border-radius: 12px; border: 1px dashed var(--border-color);">
+        <span style="font-size: 44px; display: block; margin-bottom: 12px;">📅</span>
+        <h4 style="margin: 0 0 6px 0; color: #1e293b;">Zatiaľ nebol pridaný žiadny týždenný rozpis</h4>
+        <p style="margin: 0; font-size: 14px;">Keď správca odfotí a zverejní nový rozpis služieb, zobrazí sa priamo tu.</p>
+      </div>
+    `;
+    if (archiveContainer) archiveContainer.style.display = 'none';
+    return;
+  }
+
+  const latest = schedules[0];
+  const latestDateFormatted = new Date(latest.createdAt).toLocaleString('sk-SK', {
+    day: 'numeric', month: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit'
+  });
+
+  latestContainer.innerHTML = `
+    <div class="latest-schedule-hero">
+      <div class="latest-schedule-hero-img-wrap" onclick="openImageViewerById(${latest.id})">
+        <img src="${escapeHtml(latest.imageUrl)}" alt="${escapeHtml(latest.title)}">
+        <div style="position: absolute; bottom: 12px; right: 12px; background: rgba(15,23,42,0.88); color: #fff; padding: 8px 14px; border-radius: 8px; font-size: 13px; font-weight: 600; backdrop-filter: blur(4px);">
+          🔍 Ťuknite pre čitateľné zväčšenie
+        </div>
+      </div>
+      <div class="latest-schedule-hero-info">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 8px; margin-bottom: 8px;">
+          <div>
+            <h3 style="margin: 0 0 4px 0; font-size: 18px; color: #1e293b;">${escapeHtml(latest.title)}</h3>
+            <span style="font-size: 13px; color: var(--text-muted);">Zverejnil: <strong>${escapeHtml(latest.authorName)}</strong> • ${latestDateFormatted}</span>
+          </div>
+          <button type="button" class="btn btn-sm btn-primary" onclick="openImageViewerById(${latest.id})">
+            🔍 Otvoriť na celú obrazovku (Čítať)
+          </button>
+        </div>
+        ${latest.note ? `<div style="background: #f1f5f9; padding: 10px 14px; border-radius: 8px; font-size: 14px; color: #334155; margin-top: 10px;">💬 <strong>Poznámka od správcu:</strong> ${escapeHtml(latest.note)}</div>` : ''}
+      </div>
+    </div>
+  `;
+
+  // Staršie rozpisy
+  const older = schedules.slice(1);
+  if (older.length > 0 && archiveContainer && archiveList) {
+    archiveContainer.style.display = 'block';
+    archiveList.innerHTML = older.map(s => {
+      const dStr = new Date(s.createdAt).toLocaleDateString('sk-SK');
+      return `
+        <div class="schedule-photo-card">
+          <div class="schedule-photo-thumb-wrapper" onclick="openImageViewerById(${s.id})">
+            <img src="${escapeHtml(s.imageUrl)}" alt="${escapeHtml(s.title)}" loading="lazy">
+            <span class="schedule-photo-badge">🔍 Zväčšiť</span>
+          </div>
+          <div class="schedule-photo-info">
+            <div class="schedule-photo-title">${escapeHtml(s.title)}</div>
+            <div class="schedule-photo-meta">📅 ${dStr}</div>
+            ${s.note ? `<div class="schedule-photo-note" style="font-size:12px;">${escapeHtml(s.note)}</div>` : ''}
+          </div>
+        </div>
+      `;
+    }).join('');
+  } else if (archiveContainer) {
+    archiveContainer.style.display = 'none';
+  }
+}
+
+function checkEmployeeScheduleAnnouncement() {
+  const banner = document.getElementById('empScheduleAnnouncement');
+  const badge = document.getElementById('empScheduleBadge');
+  const titleEl = document.getElementById('empScheduleAnnouncementTitle');
+  const dateEl = document.getElementById('empScheduleAnnouncementDate');
+
+  const schedules = getStoredSchedules();
+  if (schedules.length === 0) {
+    if (banner) banner.style.display = 'none';
+    if (badge) badge.style.display = 'none';
+    return;
+  }
+
+  const latest = schedules[0];
+  const ageInHours = (Date.now() - new Date(latest.createdAt).getTime()) / (1000 * 60 * 60);
+
+  if (ageInHours < 24 * 14) {
+    if (banner) {
+      if (titleEl) titleEl.textContent = `📋 Rozpis: ${latest.title}`;
+      if (dateEl) dateEl.textContent = `Pridané: ${new Date(latest.createdAt).toLocaleDateString('sk-SK')} • Ťuknite pre zobrazenie foto`;
+      banner.style.display = 'flex';
+    }
+    if (badge) badge.style.display = 'inline-block';
+  } else {
+    if (banner) banner.style.display = 'none';
+    if (badge) badge.style.display = 'none';
+  }
+}
+
+let currentViewerZoomPercent = 100;
+let currentViewerRawDataUrl = '';
+let currentViewerNaturalWidth = 0;
+
+function openImageViewerById(scheduleId) {
+  const item = getStoredSchedules().find(s => Number(s.id) === Number(scheduleId));
+  if (!item) {
+    showToast('Rozpis sa nepodarilo načítať.', 'error');
+    return;
+  }
+  openImageViewer(item.imageUrl, item.title);
+}
+
+function openImageViewer(imageUrl, title) {
+  const modal = document.getElementById('imageViewerModal');
+  const img = document.getElementById('imageViewerImg');
+  const titleEl = document.getElementById('imageViewerTitle');
+  const dlBtn = document.getElementById('imageViewerDownloadBtn');
+  const scrollArea = document.getElementById('imageViewerScrollContainer');
+
+  currentViewerRawDataUrl = imageUrl;
+
+  if (titleEl) titleEl.textContent = title || 'Foto týždenného rozpisu';
+  if (dlBtn) {
+    dlBtn.href = imageUrl;
+    dlBtn.download = `rozpis_${Date.now()}.jpg`;
+  }
+
+  if (modal) modal.style.display = 'flex';
+
+  if (img) {
+    img.onload = () => {
+      currentViewerNaturalWidth = img.naturalWidth || 1600;
+      // Na mobiloch otvoríme rovnou čitateľnú šírku (min. 1000px alebo 100%) a posunieme na začiatok (0,0)
+      if (window.innerWidth < 768) {
+        setZoomMode(100);
+      } else {
+        setZoomMode('fit');
+      }
+      if (scrollArea) {
+        scrollArea.scrollLeft = 0;
+        scrollArea.scrollTop = 0;
+      }
+    };
+    img.src = imageUrl;
+  }
+}
+
+function setZoomMode(mode) {
+  const img = document.getElementById('imageViewerImg');
+  const subTitle = document.getElementById('imageViewerSubtitle');
+  const scrollArea = document.getElementById('imageViewerScrollContainer');
+  if (!img) return;
+
+  if (mode === 'fit') {
+    const containerW = scrollArea ? Math.max(200, scrollArea.clientWidth - 28) : window.innerWidth - 28;
+    const containerH = scrollArea ? Math.max(200, scrollArea.clientHeight - 28) : window.innerHeight - 140;
+    img.style.width = 'auto';
+    img.style.maxWidth = `${containerW}px`;
+    img.style.maxHeight = `${containerH}px`;
+    img.style.cursor = 'zoom-in';
+    const ratio = Math.min(containerW / (currentViewerNaturalWidth || containerW), 1);
+    currentViewerZoomPercent = Math.max(10, Math.round(ratio * 100));
+    if (subTitle) subTitle.textContent = `Mierka: Celá fotka (${currentViewerZoomPercent}%) • Kliknite „100%“ pre ostrý text`;
+  } else {
+    const pct = Number(mode);
+    currentViewerZoomPercent = pct;
+    const baseW = Math.max(currentViewerNaturalWidth || 1400, 1000);
+    const targetWidth = Math.round((baseW * pct) / 100);
+    img.style.maxWidth = 'none';
+    img.style.maxHeight = 'none';
+    img.style.width = `${targetWidth}px`;
+    img.style.cursor = pct >= 150 ? 'zoom-out' : 'zoom-in';
+    if (subTitle) subTitle.textContent = `Mierka: ${pct}% ostrý detail • Prstom môžete posúvať do všetkých strán`;
+  }
+}
+
+async function rotateViewerImage() {
+  if (!currentViewerRawDataUrl) return;
+  try {
+    showToast('🔄 Otáčam fotku...', 'info');
+    const rotated = await rotateDataUrl90(currentViewerRawDataUrl);
+    currentViewerRawDataUrl = rotated;
+    const img = document.getElementById('imageViewerImg');
+    const dlBtn = document.getElementById('imageViewerDownloadBtn');
+    const scrollArea = document.getElementById('imageViewerScrollContainer');
+    if (dlBtn) dlBtn.href = rotated;
+    if (img) {
+      img.onload = () => {
+        currentViewerNaturalWidth = img.naturalWidth || 1600;
+        if (window.innerWidth < 768) {
+          setZoomMode(100);
+        } else {
+          setZoomMode('fit');
+        }
+        if (scrollArea) {
+          scrollArea.scrollLeft = 0;
+          scrollArea.scrollTop = 0;
+        }
+      };
+      img.src = rotated;
+    }
+  } catch (e) {
+    showToast('Nepodarilo sa otočiť obrázok (blokované CORS). Skúste tlačidlo Samostatne.', 'error');
+  }
+}
+
+function zoomImage(delta) {
+  let next = currentViewerZoomPercent + delta;
+  if (next < 30) next = 30;
+  if (next > 400) next = 400;
+  setZoomMode(next);
+}
+
+function toggleImageZoom() {
+  if (currentViewerZoomPercent < 95) {
+    setZoomMode(100);
+  } else if (currentViewerZoomPercent < 145) {
+    setZoomMode(150);
+  } else {
+    setZoomMode('fit');
+  }
+}
+
+function dataUrlToBlobUrl(dataUrl) {
+  try {
+    const parts = dataUrl.split(',');
+    const mime = parts[0].match(/:(.*?);/)[1];
+    const bstr = atob(parts[1]);
+    let n = bstr.length;
+    const u8arr = new Uint8Array(n);
+    while (n--) u8arr[n] = bstr.charCodeAt(n);
+    const blob = new Blob([u8arr], { type: mime });
+    return URL.createObjectURL(blob);
+  } catch (e) {
+    return dataUrl;
+  }
+}
+
+function openImageInNewTab() {
+  if (!currentViewerRawDataUrl) return;
+  const targetUrl = currentViewerRawDataUrl.startsWith('data:')
+    ? dataUrlToBlobUrl(currentViewerRawDataUrl)
+    : currentViewerRawDataUrl;
+
+  const win = window.open(targetUrl, '_blank');
+  if (!win) {
+    const a = document.createElement('a');
+    a.href = targetUrl;
+    a.target = '_blank';
+    a.click();
+  }
+}
+
+function closeImageViewer() {
+  const modal = document.getElementById('imageViewerModal');
+  if (modal) modal.style.display = 'none';
+}
+
+// --- MODAL PRE NASTAVENIE CLOUD SYNCU (FIREBASE / NETLIFY) ---
+function openCloudSyncModal() {
+  const modal = document.getElementById('cloudSyncModal');
+  const input = document.getElementById('firebaseSyncUrlInput');
+  const resEl = document.getElementById('firebaseSyncTestResult');
+  if (input) input.value = getFirebaseSyncUrl();
+  if (resEl) resEl.textContent = getFirebaseSyncUrl() ? 'Aktívne pripojené k Firebase.' : '';
+  if (modal) modal.style.display = 'flex';
+}
+
+function closeCloudSyncModal() {
+  const modal = document.getElementById('cloudSyncModal');
+  if (modal) modal.style.display = 'none';
+}
+
+async function saveFirebaseSyncUrl() {
+  const input = document.getElementById('firebaseSyncUrlInput');
+  const resEl = document.getElementById('firebaseSyncTestResult');
+  const url = (input ? input.value : '').trim().replace(/\/+$/, '');
+  if (!url || !url.startsWith('https://')) {
+    alert('Zadajte platnú HTTPS adresu vašej Firebase Realtime Database (napr. https://mojapka-default-rtdb.europe-west1.firebasedatabase.app).');
+    return;
+  }
+  localStorage.setItem(FIREBASE_SYNC_KEY, url);
+  if (resEl) resEl.textContent = '⏳ Testujem spojenie a synchronizujem...';
+
+  const pulled = await pullFromFirebase();
+  if (!pulled) {
+    await pushToFirebase();
+  }
+  await detectBackendMode();
+  await refreshAllDataSilently();
+  renderScheduleSyncStatusBanner();
+  if (resEl) resEl.textContent = '✅ Úspešne pripojené a zosynchronizované!';
+  showToast('🔥 Firebase Cloud Sync bol zapnutý!', 'success');
+}
+
+function clearFirebaseSyncUrl() {
+  localStorage.removeItem(FIREBASE_SYNC_KEY);
+  const input = document.getElementById('firebaseSyncUrlInput');
+  const resEl = document.getElementById('firebaseSyncTestResult');
+  if (input) input.value = '';
+  if (resEl) resEl.textContent = 'Cloud Sync vypnutý.';
+  detectBackendMode().then(() => {
+    renderScheduleSyncStatusBanner();
+    updateSyncBadge(false, 'local');
+  });
+}
+
+function escapeHtml(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }

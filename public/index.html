@@ -2,7 +2,7 @@
 <html lang="sk">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes, viewport-fit=cover">
   <title>SP Asistent - Kalendár a Absencie</title>
   
   <!-- PWA & Mobile Meta -->
@@ -11,27 +11,45 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="SP Asistent">
-  <link rel="manifest" href="/manifest.json">
-  <link rel="icon" type="image/svg+xml" href="/icons/icon.svg">
-  <link rel="apple-touch-icon" href="/icons/icon-192.png">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" type="image/svg+xml" href="icons/icon.svg">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
 
   <!-- Google Fonts: Inter -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
   
-  <link rel="stylesheet" href="/styles.css?v=3.1">
+  <link rel="stylesheet" href="styles.css?v=4.0">
 </head>
 <body>
   <!-- HLAVIČKA APLIKÁCIE -->
   <header class="app-header">
     <div class="header-left">
       <div class="app-logo">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
-          <line x1="16" y1="2" x2="16" y2="6"></line>
-          <line x1="8" y1="2" x2="8" y2="6"></line>
-          <line x1="3" y1="10" x2="21" y2="10"></line>
+        <svg viewBox="0 0 100 100" width="38" height="38">
+          <defs>
+            <linearGradient id="spBgGradNav" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#1e293b"/>
+              <stop offset="100%" stop-color="#0f172a"/>
+            </linearGradient>
+            <linearGradient id="spCalGradNav" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#3b82f6"/>
+              <stop offset="100%" stop-color="#1d4ed8"/>
+            </linearGradient>
+            <linearGradient id="spAccentGradNav" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#10b981"/>
+              <stop offset="100%" stop-color="#059669"/>
+            </linearGradient>
+          </defs>
+          <rect x="6" y="6" width="88" height="88" rx="24" fill="url(#spBgGradNav)" stroke="#334155" stroke-width="2"/>
+          <rect x="18" y="24" width="64" height="58" rx="12" fill="url(#spCalGradNav)"/>
+          <path d="M18 34 A10 10 0 0 1 28 24 L72 24 A10 10 0 0 1 82 34 L82 40 L18 40 Z" fill="#1e40af"/>
+          <rect x="30" y="16" width="6" height="14" rx="3" fill="#f8fafc"/>
+          <rect x="64" y="16" width="6" height="14" rx="3" fill="#f8fafc"/>
+          <text x="50" y="62" font-family="'Inter', sans-serif" font-size="22" font-weight="900" fill="#ffffff" text-anchor="middle">SP</text>
+          <circle cx="74" cy="74" r="14" fill="url(#spAccentGradNav)" stroke="#0f172a" stroke-width="3"/>
+          <path d="M68 74 L72 78 L80 69" fill="none" stroke="#ffffff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
       </div>
       <div class="header-titles">
@@ -48,7 +66,7 @@
       <button id="refreshSyncBtn" class="btn btn-sm btn-ghost" title="Okamžite zosynchronizovať najnovšie zmeny z databázy" onclick="manualRefreshSync()">
         🔄 Obnoviť
       </button>
-      <button id="pwaInstallBtn" class="btn btn-sm btn-outline btn-install" style="display: none;">
+      <button id="pwaInstallBtn" class="btn btn-sm btn-success btn-install pwa-install-trigger-btn" onclick="triggerPwaInstall()" title="Inštalovať aplikáciu do mobilu">
         📲 Inštalovať do mobilu
       </button>
       <div id="userInfoContainer" class="user-info-dropdown">
@@ -71,7 +89,33 @@
       <div class="login-card">
         <div class="login-header">
           <div class="login-logo">
-            <img src="/icons/icon.svg" alt="SP Asistent Logo" width="64" height="64">
+            <svg viewBox="0 0 100 100" width="76" height="76">
+              <defs>
+                <linearGradient id="spBgGradHero" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stop-color="#1e293b"/>
+                  <stop offset="100%" stop-color="#0f172a"/>
+                </linearGradient>
+                <linearGradient id="spCalGradHero" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stop-color="#3b82f6"/>
+                  <stop offset="100%" stop-color="#1d4ed8"/>
+                </linearGradient>
+                <linearGradient id="spAccentGradHero" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stop-color="#10b981"/>
+                  <stop offset="100%" stop-color="#059669"/>
+                </linearGradient>
+              </defs>
+              <rect x="6" y="6" width="88" height="88" rx="24" fill="url(#spBgGradHero)" stroke="#334155" stroke-width="2"/>
+              <rect x="18" y="24" width="64" height="58" rx="12" fill="url(#spCalGradHero)"/>
+              <path d="M18 34 A10 10 0 0 1 28 24 L72 24 A10 10 0 0 1 82 34 L82 40 L18 40 Z" fill="#1e40af"/>
+              <rect x="30" y="16" width="6" height="14" rx="3" fill="#f8fafc"/>
+              <rect x="64" y="16" width="6" height="14" rx="3" fill="#f8fafc"/>
+              <text x="50" y="62" font-family="'Inter', sans-serif" font-size="22" font-weight="900" fill="#ffffff" text-anchor="middle">SP</text>
+              <circle cx="28" cy="72" r="2.5" fill="#93c5fd" opacity="0.9"/>
+              <circle cx="38" cy="72" r="2.5" fill="#93c5fd" opacity="0.9"/>
+              <circle cx="48" cy="72" r="2.5" fill="#93c5fd" opacity="0.9"/>
+              <circle cx="74" cy="74" r="14" fill="url(#spAccentGradHero)" stroke="#0f172a" stroke-width="3"/>
+              <path d="M68 74 L72 78 L80 69" fill="none" stroke="#ffffff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
           </div>
           <h2>Prihlásenie do SP Asistenta</h2>
           <p class="text-muted">Vyberte si svoj profil pre zadanie absencie alebo správu tímu</p>
@@ -130,6 +174,20 @@
         </form>
 
         <div id="loginError" class="alert alert-danger" style="display: none;"></div>
+
+        <!-- PWA Inštalačný banner na prihlasovacej obrazovke -->
+        <div id="loginPwaBanner" class="login-pwa-banner">
+          <div class="pwa-banner-left">
+            <span class="pwa-banner-icon">📱</span>
+            <div>
+              <div class="pwa-banner-title">Inštalovať do mobilu</div>
+              <div class="pwa-banner-desc">Pripnite si SP Asistenta na plochu mobilu ako bežnú aplikáciu.</div>
+            </div>
+          </div>
+          <button type="button" class="btn btn-sm btn-primary pwa-install-trigger-btn" onclick="triggerPwaInstall()">
+            📲 Inštalovať
+          </button>
+        </div>
       </div>
     </section>
 
@@ -158,10 +216,24 @@
         <button id="empTabBtnMatrix" class="mgr-tab" onclick="switchEmpTab('matrix')">
           📊 Tímová matica (Prehľad kolegov v práci)
         </button>
+        <button id="empTabBtnSchedules" class="mgr-tab" onclick="switchEmpTab('schedules')">
+          📸 Týždenné rozpisy <span id="empScheduleBadge" class="badge badge-success" style="display:none; font-size:10px; margin-left:4px;">NOVÉ</span>
+        </button>
       </div>
 
       <!-- ZÁLOŽKA 1: OSOBNÝ PREHĽAD ZAMESTNANCA -->
       <div id="empTabOverviewContent" class="emp-tab-content">
+        <!-- Rýchly oznam o novom rozpise na nástenke -->
+        <div id="empScheduleAnnouncement" class="schedule-alert-banner" style="display: none;" onclick="switchEmpTab('schedules')">
+          <div style="display: flex; align-items: center; gap: 12px;">
+            <span style="font-size: 26px;">📋</span>
+            <div>
+              <strong id="empScheduleAnnouncementTitle" style="color: #1e40af; font-size: 14px;">Nový týždenný rozpis služieb</strong>
+              <div id="empScheduleAnnouncementDate" style="color: #3b82f6; font-size: 12px;">Kliknite sem pre zobrazenie fotky</div>
+            </div>
+          </div>
+          <button type="button" class="btn btn-sm btn-primary">Zobraziť foto 👉</button>
+        </div>
         <!-- KARTY ZOSTATKOV PRE ZAMESTNANCA -->
         <div class="stats-grid">
           <div class="stat-card vacation-card">
@@ -278,6 +350,31 @@
           </div>
         </div>
       </div>
+
+      <!-- ZÁLOŽKA 3: TÝŽDENNÉ ROZPISY PRE ZAMESTNANCA -->
+      <div id="empTabSchedulesContent" class="emp-tab-content" style="display: none;">
+        <div class="card">
+          <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+            <div>
+              <h3 class="card-title" style="margin: 0;">📸 Týždenný rozpis služieb</h3>
+              <p class="text-muted" style="margin: 4px 0 0; font-size: 13px;">Aktuálny rozpis pridaný správcom. Ťuknutím na fotku ju zväčšíte na celú obrazovku.</p>
+            </div>
+            <button class="btn btn-sm btn-outline" onclick="renderEmployeeSchedules()">🔄 Obnoviť</button>
+          </div>
+          <div class="card-body" style="padding: 16px;">
+            <div id="empLatestScheduleContainer">
+              <!-- Tu sa zobrazí najnovší rozpis v plnej kráse -->
+            </div>
+
+            <div id="empSchedulesArchiveContainer" style="margin-top: 32px; display: none;">
+              <h4 style="font-size: 16px; margin-bottom: 12px; color: var(--text-muted); border-top: 1px solid var(--border-color); padding-top: 20px;">
+                📁 Staršie týždenné rozpisy
+              </h4>
+              <div id="empSchedulesArchiveList" class="schedules-grid"></div>
+            </div>
+          </div>
+        </div>
+      </div>
     </section>
 
     <!-- 3. ROZHRANIE MANAŽÉRA (DESKTOP & MOBIL) -->
@@ -301,6 +398,9 @@
         </button>
         <button class="mgr-tab" onclick="switchManagerTab('mobile-qr')">
           📱 Mobilný prístup (QR)
+        </button>
+        <button class="mgr-tab" onclick="switchManagerTab('schedules')">
+          📸 Týždenné rozpisy
         </button>
       </div>
 
@@ -536,6 +636,65 @@
               <span class="step-num">3</span>
               <h4>Prihlásenie PINom</h4>
               <p>Zamestnanec zvolí svoje meno a zadá 4-miestny PIN kód (ktorý vidíte v správe zamestnancov).</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 7. ZÁLOŽKA: TÝŽDENNÉ ROZPISY A FOTKY PRE MANAŽÉRA -->
+      <div id="mgrTabSchedules" class="mgr-tab-content">
+        <div id="scheduleSyncStatusBanner" style="margin-bottom: 16px;"></div>
+
+        <div class="card" style="margin-bottom: 24px;">
+          <div class="card-header">
+            <h3 class="card-title">📤 Pridať nový týždenný rozpis (Foto / Obrázok)</h3>
+          </div>
+          <div class="card-body">
+            <form id="uploadScheduleForm" onsubmit="handleUploadSchedule(event)">
+              <div class="form-group" style="margin-bottom: 14px;">
+                <label for="scheduleTitleInput" class="form-label"><strong>Názov alebo týždeň rozpisu *</strong></label>
+                <input type="text" id="scheduleTitleInput" class="form-control" placeholder="Napr. Rozpis služieb na týždeň 17.11. - 23.11." required>
+              </div>
+
+              <div class="form-group" style="margin-bottom: 14px;">
+                <label for="scheduleNoteInput" class="form-label">Poznámka / Odkaz pre tím (voliteľné)</label>
+                <textarea id="scheduleNoteInput" class="form-control" rows="2" placeholder="Napr. Prosím skontrolujte si zmeny na piatok a víkend. Prípadné výmeny hláste správcovi."></textarea>
+              </div>
+
+              <div class="form-group" style="margin-bottom: 16px;">
+                <label class="form-label"><strong>Fotka alebo obrázok rozpisu *</strong></label>
+                <div class="schedule-dropzone" id="scheduleDropzone" onclick="document.getElementById('scheduleFileInput').click()">
+                  <input type="file" id="scheduleFileInput" accept="image/*" style="display: none;" onchange="handleScheduleFileSelect(event)">
+                  <div id="scheduleDropzonePrompt">
+                    <span style="font-size: 38px; display: block; margin-bottom: 8px;">📷</span>
+                    <strong style="color: var(--primary); font-size: 15px;">Kliknite sem pre výber fotky z galérie / fotoaparátu</strong>
+                    <p style="margin: 4px 0 0; font-size: 13px; color: var(--text-muted);">Vyberte uloženú fotku alebo priamo odfoťte papierový rozpis</p>
+                  </div>
+                  <div id="scheduleImagePreviewContainer" style="display: none; margin-top: 10px;">
+                    <img id="scheduleImagePreview" src="" alt="Náhľad" style="max-height: 280px; max-width: 100%; border-radius: 8px; box-shadow: var(--shadow); object-fit: contain;">
+                    <div style="margin-top: 10px; display: flex; justify-content: center; gap: 10px; flex-wrap: wrap;">
+                      <button type="button" class="btn btn-sm btn-outline" onclick="event.stopPropagation(); rotateSelectedScheduleImage();">🔄 Otočiť o 90°</button>
+                      <button type="button" class="btn btn-sm btn-ghost" onclick="event.stopPropagation(); removeSelectedScheduleFile();">✕ Zrušiť a vybrať inú</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <button type="submit" id="submitScheduleBtn" class="btn btn-primary btn-lg" style="display: inline-flex; align-items: center; gap: 8px;">
+                <span>🚀 Zverejniť rozpis pre zamestnancov</span>
+              </button>
+            </form>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+            <h3 class="card-title" style="margin: 0;">📋 Archív zverejnených rozpisov</h3>
+            <span id="mgrSchedulesCount" class="badge badge-primary">0 rozpisov</span>
+          </div>
+          <div class="card-body">
+            <div id="mgrSchedulesList" class="schedules-grid">
+              <!-- Dynamicky naplnené zoznamom rozpisov -->
             </div>
           </div>
         </div>
@@ -790,7 +949,143 @@
     </div>
   </div>
 
+  <!-- MODAL: NÁVOD NA INŠTALÁCIU PWA DO MOBILU -->
+  <div id="pwaInstallModal" class="modal" style="display: none;">
+    <div class="modal-backdrop" onclick="closePwaInstallModal()"></div>
+    <div class="modal-card" style="max-width: 480px;">
+      <div class="modal-header">
+        <h3 class="modal-title">📲 Inštalácia aplikácie do mobilu</h3>
+        <button type="button" class="modal-close-btn" onclick="closePwaInstallModal()">✕</button>
+      </div>
+      <div class="modal-body" style="padding: 16px;">
+        <div id="pwaNativePromptBlock" style="display: none; text-align: center; margin-bottom: 16px;">
+          <button type="button" class="btn btn-success btn-block btn-lg" onclick="executeNativePwaPrompt()">
+            ⚡ Nainštalovať jedným klikom
+          </button>
+          <div style="margin-top: 10px; font-size: 13px; color: var(--text-muted);">alebo postupujte podľa návodu nižšie:</div>
+        </div>
+
+        <div class="pwa-instructions-card" style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px; margin-bottom: 14px;">
+          <h4 style="margin: 0 0 8px 0; color: #1e293b; display: flex; align-items: center; gap: 8px; font-size: 15px;">
+            🍏 Pre iPhone & iPad (Safari):
+          </h4>
+          <ol style="margin: 0; padding-left: 20px; font-size: 13px; line-height: 1.6; color: #475569;">
+            <li>Dole v lište Safari kliknite na ikonu <strong>Zdieľať (štvorec so šípkou ⭡)</strong>.</li>
+            <li>V ponuke potiahnite trochu nižšie a ťuknite na <strong>„Pridať na plochu“ (➕)</strong>.</li>
+            <li>Vpravo hore ťuknite na <strong>„Pridať“</strong>.</li>
+          </ol>
+        </div>
+
+        <div class="pwa-instructions-card" style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px;">
+          <h4 style="margin: 0 0 8px 0; color: #1e293b; display: flex; align-items: center; gap: 8px; font-size: 15px;">
+            🤖 Pre Android (Chrome / Brave / Edge):
+          </h4>
+          <ol style="margin: 0; padding-left: 20px; font-size: 13px; line-height: 1.6; color: #475569;">
+            <li>Vpravo hore kliknite na <strong>menu (tri bodky ⋮)</strong>.</li>
+            <li>Zvoľte možnosť <strong>„Inštalovať aplikáciu“</strong> alebo <strong>„Pridať na plochu“</strong>.</li>
+            <li>Potvrďte inštaláciu.</li>
+          </ol>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-primary btn-block" onclick="closePwaInstallModal()">Rozumiem, hotovo 👍</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: ZOBRAZENIE FOTKY ROZPISU V PLNOM ROZLÍŠENÍ (ULTRA-CLEAR) -->
+  <div id="imageViewerModal" class="modal" style="display: none; align-items: center; justify-content: center; z-index: 10000; padding: 0;">
+    <div class="modal-backdrop" onclick="closeImageViewer()"></div>
+    <div class="modal-card image-viewer-modal-card">
+      
+      <!-- HORNÁ LIŠTA S OVLÁDACÍMI PRVKAMI -->
+      <div class="image-viewer-header">
+        <div class="image-viewer-header-left">
+          <span style="font-size: 20px;">📋</span>
+          <div>
+            <h4 id="imageViewerTitle" class="image-viewer-title">Foto rozpisu</h4>
+            <span id="imageViewerSubtitle" class="image-viewer-subtitle">Mierka: 100% detail</span>
+          </div>
+        </div>
+
+        <div class="image-viewer-header-actions">
+          <!-- ZOOM A ROTÁCIA TLAČIDLÁ -->
+          <div class="zoom-btn-group">
+            <button type="button" class="btn btn-sm btn-ghost zoom-btn" onclick="zoomImage(-25)" title="Zmenšiť">🔍 -</button>
+            <button type="button" id="zoomLevelBtn" class="btn btn-sm btn-outline zoom-btn" onclick="setZoomMode('fit')" title="Prispôsobiť celej obrazovke">📱 Zmestiť</button>
+            <button type="button" class="btn btn-sm btn-primary zoom-btn" onclick="setZoomMode(100)" title="100% originálna čitateľná veľkosť">🔍 100%</button>
+            <button type="button" class="btn btn-sm btn-ghost zoom-btn" onclick="setZoomMode(150)" title="150% priblíženie na detail">🔎 150%</button>
+            <button type="button" class="btn btn-sm btn-ghost zoom-btn" onclick="zoomImage(25)" title="Zväčšiť">🔍 +</button>
+          </div>
+
+          <button type="button" class="btn btn-sm btn-outline" onclick="rotateViewerImage()" title="Otočiť fotku o 90 stupňov">
+            🔄 Otočiť
+          </button>
+
+          <button type="button" class="btn btn-sm btn-outline" onclick="openImageInNewTab()" title="Otvoriť samostatne v novom okne pre plný mobilný pinch-to-zoom">
+            ↗️ Samostatne
+          </button>
+          <a id="imageViewerDownloadBtn" href="#" download="rozpis.jpg" class="btn btn-sm btn-success" title="Stiahnuť originál fotky">
+            📥 Stiahnuť
+          </a>
+          <button type="button" class="modal-close-btn" onclick="closeImageViewer()" title="Zavrieť">✕</button>
+        </div>
+      </div>
+
+      <!-- HLAVNÁ OBLASŤ PRE PREHLIADANIE A POSÚVANIE PRSTOM -->
+      <div id="imageViewerScrollContainer" class="image-viewer-scroll-area">
+        <img id="imageViewerImg" src="" alt="Rozpis" class="image-viewer-img" ondblclick="toggleImageZoom()">
+      </div>
+
+      <!-- SPODNÁ POMOCNÁ LIŠTA -->
+      <div class="image-viewer-footer">
+        <span>💡 <strong>Tip:</strong> Prstom voľne posúvajte do všetkých strán. Ak je fotka nabok, kliknite na <strong>🔄 Otočiť</strong>. Pre natívne priblíženie dvoma prstami kliknite na <strong>↗️ Samostatne</strong>.</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: NASTAVENIE CLOUD SYNCHRONIZÁCIE MEDZI MOBILOM A PC -->
+  <div id="cloudSyncModal" class="modal-backdrop" style="display: none;">
+    <div class="modal-card" style="max-width: 560px;">
+      <div class="modal-header">
+        <h3 class="modal-title">☁️ Synchronizácia medzi mobilom a PC</h3>
+        <button type="button" class="modal-close" onclick="closeCloudSyncModal()">×</button>
+      </div>
+      <div class="modal-body" style="font-size: 14px; line-height: 1.55;">
+        <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 10px; padding: 14px; margin-bottom: 16px;">
+          <strong style="color: #1e3a8a; display: block; margin-bottom: 6px;">ℹ️ Prečo sa fotka z mobilu neukázala na PC?</strong>
+          <p style="margin: 0; color: #1e40af;">Keď je web nahratý iba ako statický ZIP súbor cez „Netlify Drop“, dáta ostávajú uložené len v pamäti toho konkrétneho telefónu. Aby mobil, počítač aj mobily zamestnancov zdieľali rovnaké dáta a fotky, musia byť pripojené do spoločného cloudu.</p>
+        </div>
+
+        <div style="margin-bottom: 16px;">
+          <strong style="display: block; margin-bottom: 6px; color: #0f172a;">Spôsob 1 (Najjednoduchší – priamo na Netlify zadarmo):</strong>
+          <ol style="margin: 0; padding-left: 20px; color: #334155;">
+            <li>Nahrajte súbory z balíčka <code>SP-asistent-cloud.zip</code> do vášho GitHub repozitára <code>YankeeAlpha/sp-asistent</code>.</li>
+            <li>Na Netlify (projekt <code>sp-asistent</code>) otvorte <strong>Site configuration → Build & deploy → Link repository</strong> a prepojte GitHub.</li>
+            <li>Adresa <strong>sp-asistent.netlify.app</strong> zostane nezmenená a zapne sa vstavaný <strong>Netlify Blobs Cloud</strong> – bez ďalších účtov!</li>
+          </ol>
+        </div>
+
+        <div style="border-top: 1px solid var(--border-color); padding-top: 14px;">
+          <strong style="display: block; margin-bottom: 6px; color: #0f172a;">Spôsob 2 (Ak používate statický ZIP + vlastný Firebase Cloud):</strong>
+          <p style="margin: 0 0 8px; color: var(--text-muted); font-size: 13px;">Zadajte adresu vašej Firebase Realtime Database (napr. <code>https://mojapka-default-rtdb.europe-west1.firebasedatabase.app</code>) a uložte na mobile aj PC:</p>
+          <div style="display: flex; gap: 8px;">
+            <input type="url" id="firebaseSyncUrlInput" class="form-control" placeholder="https://...-default-rtdb.europe-west1.firebasedatabase.app">
+            <button type="button" class="btn btn-primary" onclick="saveFirebaseSyncUrl()">Uložiť</button>
+          </div>
+          <div style="margin-top: 8px; display: flex; justify-content: space-between; align-items: center;">
+            <span id="firebaseSyncTestResult" style="font-size: 12px; color: var(--text-muted);"></span>
+            <button type="button" class="btn btn-sm btn-ghost" onclick="clearFirebaseSyncUrl()">Vypnúť</button>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-primary btn-block" onclick="closeCloudSyncModal()">Zavrieť</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Knižnice a Hlavný skript s cache-buster verziou -->
-  <script src="/app.js?v=3.1"></script>
+  <script src="app.js?v=4.0"></script>
 </body>
 </html>

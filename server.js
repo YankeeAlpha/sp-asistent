@@ -16,14 +16,31 @@ let sqliteDb = null;
 let dataVersion = Date.now();
 
 let memEmployees = [
-  { id: 1, name: 'Správca / Manažér', role: 'admin', pin: '0000', annual_leave_days: 25, color: '#8b5cf6', is_active: 1 },
-  { id: 2, name: 'Ján Novák', role: 'employee', pin: '1111', annual_leave_days: 25, color: '#3b82f6', is_active: 1 },
-  { id: 3, name: 'Mária Kováčová', role: 'employee', pin: '2222', annual_leave_days: 25, color: '#10b981', is_active: 1 },
-  { id: 4, name: 'Peter Horváth', role: 'employee', pin: '3333', annual_leave_days: 25, color: '#f59e0b', is_active: 1 }
+  { id: 1, name: "Ján Mihalčin", role: "admin", pin: "4689", annual_leave_days: 25, color: "#ff8800", is_active: 1, created_at: "2026-11-11 11:29:43" },
+  { id: 5, name: "Peter Belko", role: "employee", pin: "9573", annual_leave_days: 25, color: "#3b82f6", is_active: 1, created_at: "2026-11-11 11:32:02" },
+  { id: 6, name: "Ján Cina", role: "employee", pin: "6349", annual_leave_days: 25, color: "#3b82f6", is_active: 1, created_at: "2026-11-11 11:32:11" },
+  { id: 7, name: "Peter Čačko", role: "employee", pin: "1982", annual_leave_days: 25, color: "#3b82f6", is_active: 1, created_at: "2026-11-11 11:32:24" },
+  { id: 8, name: "Martin Hamza", role: "employee", pin: "8162", annual_leave_days: 25, color: "#3b82f6", is_active: 1, created_at: "2026-11-11 11:32:36" },
+  { id: 9, name: "Ján Kasič", role: "employee", pin: "2817", annual_leave_days: 25, color: "#3b82f6", is_active: 1, created_at: "2026-11-11 11:33:05" },
+  { id: 10, name: "Peter Kiš", role: "employee", pin: "1088", annual_leave_days: 25, color: "#3b82f6", is_active: 1, created_at: "2026-11-11 11:33:15" },
+  { id: 11, name: "Rudolf Králik", role: "employee", pin: "9108", annual_leave_days: 25, color: "#3b82f6", is_active: 1, created_at: "2026-11-11 11:33:26" },
+  { id: 12, name: "Michal Kríž", role: "employee", pin: "3692", annual_leave_days: 25, color: "#3b82f6", is_active: 1, created_at: "2026-11-11 11:33:37" },
+  { id: 13, name: "Milan Kužma-Meľko", role: "employee", pin: "9580", annual_leave_days: 25, color: "#3b82f6", is_active: 1, created_at: "2026-11-11 11:33:55" },
+  { id: 14, name: "František Michalov", role: "employee", pin: "8716", annual_leave_days: 25, color: "#3b82f6", is_active: 1, created_at: "2026-11-11 11:34:17" },
+  { id: 15, name: "Miroslav Mišovic", role: "employee", pin: "6603", annual_leave_days: 25, color: "#3b82f6", is_active: 1, created_at: "2026-11-11 11:34:40" },
+  { id: 16, name: "Dávid Moskaľ", role: "employee", pin: "1604", annual_leave_days: 25, color: "#3b82f6", is_active: 1, created_at: "2026-11-11 11:34:51" },
+  { id: 17, name: "Jozef Pempek", role: "employee", pin: "8788", annual_leave_days: 25, color: "#3b82f6", is_active: 1, created_at: "2026-11-11 11:35:03" },
+  { id: 18, name: "Dušan Szöke", role: "employee", pin: "1702", annual_leave_days: 25, color: "#3b82f6", is_active: 1, created_at: "2026-11-11 11:35:24" },
+  { id: 19, name: "Ján Šarudi", role: "employee", pin: "9872", annual_leave_days: 25, color: "#3b82f6", is_active: 1, created_at: "2026-11-11 11:35:36" },
+  { id: 20, name: "Miloš Ujhelyi", role: "employee", pin: "3955", annual_leave_days: 25, color: "#3b82f6", is_active: 1, created_at: "2026-11-11 11:35:48" },
+  { id: 21, name: "Jozef Vajda", role: "employee", pin: "9153", annual_leave_days: 25, color: "#3b82f6", is_active: 1, created_at: "2026-11-11 11:36:00" }
 ];
-let memAbsences = [];
-let nextEmpId = 5;
-let nextAbsId = 1;
+let memAbsences = [
+  { id: 1, employee_id: 9, type: "pn", start_date: "2026-11-01", end_date: "2026-11-30", is_half_day: 0, hours: 0, note: "", status: "approved", created_at: "2026-11-11 11:37:15" },
+  { id: 2, employee_id: 18, type: "ocr", start_date: "2026-11-30", end_date: "2026-11-30", is_half_day: 0, hours: 0, note: "", status: "rejected", created_at: "2026-11-11 11:38:43" }
+];
+let nextEmpId = 22;
+let nextAbsId = 3;
 
 function toPgSql(sql) {
   let index = 1;
@@ -510,6 +527,99 @@ async function handleRequest(req, res) {
   }
 
   // --- API ROUTY ---
+
+  // 0a. Health check pre auto-detekciu cloudu vs lokálneho HTML
+  if (pathname === '/api/health' && method === 'GET') {
+    return sendJson(res, 200, { ok: true, mode: isServerless ? 'cloud' : 'local-server', dbType });
+  }
+
+  // 0b. Týždenné rozpisy (fotky)
+  if (pathname === '/api/schedules' && method === 'GET') {
+    try {
+      const storeFile = path.join(path.dirname(DB_FILE), 'schedules_data.json');
+      let list = [];
+      if (fs.existsSync(storeFile)) {
+        list = JSON.parse(fs.readFileSync(storeFile, 'utf8'));
+      }
+      return sendJson(res, 200, Array.isArray(list) ? list : []);
+    } catch (e) {
+      return sendJson(res, 200, []);
+    }
+  }
+
+  if (pathname === '/api/schedules' && method === 'POST') {
+    try {
+      const body = await parseJsonBody(req);
+      const id = Date.now();
+      const imageDataUrl = body.imageData || body.imageUrl || '';
+      const match = String(imageDataUrl).match(/^data:(image\/[a-zA-Z0-9+.-]+);base64,(.+)$/);
+      if (!match) {
+        return sendJson(res, 400, { error: 'Neplatný formát obrázka' });
+      }
+      const ext = match[1].includes('png') ? 'png' : 'jpg';
+      const imgDir = path.join(path.dirname(DB_FILE), 'schedules_uploads');
+      if (!fs.existsSync(imgDir)) fs.mkdirSync(imgDir, { recursive: true });
+      fs.writeFileSync(path.join(imgDir, `${id}.${ext}`), Buffer.from(match[2], 'base64'));
+
+      const storeFile = path.join(path.dirname(DB_FILE), 'schedules_data.json');
+      let list = [];
+      if (fs.existsSync(storeFile)) {
+        try { list = JSON.parse(fs.readFileSync(storeFile, 'utf8')); } catch (e) {}
+      }
+      if (!Array.isArray(list)) list = [];
+
+      const newSchedule = {
+        id,
+        title: body.title || 'Týždenný rozpis',
+        note: body.note || '',
+        imageUrl: `/api/schedules/image/${id}`,
+        ext,
+        createdAt: new Date().toISOString(),
+        authorName: body.authorName || 'Správca'
+      };
+      list.unshift(newSchedule);
+      if (list.length > 20) list = list.slice(0, 20);
+      fs.writeFileSync(storeFile, JSON.stringify(list, null, 2));
+      notifyDataChanged();
+      return sendJson(res, 200, { success: true, schedule: newSchedule });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  if (pathname.startsWith('/api/schedules/image/') && method === 'GET') {
+    const id = pathname.split('/').pop();
+    const imgDir = path.join(path.dirname(DB_FILE), 'schedules_uploads');
+    const jpgPath = path.join(imgDir, `${id}.jpg`);
+    const pngPath = path.join(imgDir, `${id}.png`);
+    const target = fs.existsSync(jpgPath) ? jpgPath : (fs.existsSync(pngPath) ? pngPath : null);
+    if (!target) {
+      res.statusCode = 404;
+      return res.end('Obrázok nenájdený');
+    }
+    res.setHeader('Content-Type', target.endsWith('.png') ? 'image/png' : 'image/jpeg');
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    res.statusCode = 200;
+    return res.end(fs.readFileSync(target));
+  }
+
+  if (pathname.startsWith('/api/schedules/') && method === 'DELETE') {
+    const id = Number(pathname.split('/')[3]);
+    const storeFile = path.join(path.dirname(DB_FILE), 'schedules_data.json');
+    let list = [];
+    if (fs.existsSync(storeFile)) {
+      try { list = JSON.parse(fs.readFileSync(storeFile, 'utf8')); } catch (e) {}
+    }
+    list = Array.isArray(list) ? list.filter(s => s.id !== id) : [];
+    fs.writeFileSync(storeFile, JSON.stringify(list, null, 2));
+    const imgDir = path.join(path.dirname(DB_FILE), 'schedules_uploads');
+    ['jpg', 'png'].forEach(ext => {
+      const p = path.join(imgDir, `${id}.${ext}`);
+      if (fs.existsSync(p)) fs.unlinkSync(p);
+    });
+    notifyDataChanged();
+    return sendJson(res, 200, { success: true });
+  }
 
   // 0. Synchronizácia & Živý stav
   if (pathname === '/api/sync/status' && method === 'GET') {
