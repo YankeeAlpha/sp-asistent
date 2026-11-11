@@ -1087,36 +1087,40 @@ async function handleRequest(req, res) {
     }
   }
 
-  // --- STATICKÉ SÚBORY (pre lokálny server) ---
-  let filePath = path.join(PUBLIC_DIR, pathname === '/' ? 'index.html' : pathname);
-  
-  if (!filePath.startsWith(PUBLIC_DIR)) {
-    res.statusCode = 403;
-    return res.end('Prístup odmietnutý');
-  }
+  // --- STATICKÉ SÚBORY (pre lokálny aj cloudový server) ---
+  return new Promise((resolve) => {
+    const filename = (pathname === '/' || !pathname) ? 'index.html' : pathname.replace(/^\//, '');
+    const tryPaths = [
+      path.join(PUBLIC_DIR, filename),
+      path.join(__dirname, filename),
+      path.join(PUBLIC_DIR, 'index.html'),
+      path.join(__dirname, 'index.html')
+    ];
 
-  fs.stat(filePath, (err, stats) => {
-    if (err || !stats.isFile()) {
-      filePath = path.join(PUBLIC_DIR, 'index.html');
-    }
-
-    const ext = path.extname(filePath).toLowerCase();
-    const contentType = MIME_TYPES[ext] || 'application/octet-stream';
-
-    fs.readFile(filePath, (readErr, content) => {
-      if (readErr) {
+    function tryNext(idx) {
+      if (idx >= tryPaths.length) {
         res.setHeader('Content-Type', 'text/plain; charset=utf-8');
         res.statusCode = 404;
-        return res.end('Súbor nebol nájdený');
+        res.end('Súbor nebol nájdený');
+        return resolve();
       }
+      fs.readFile(tryPaths[idx], (err, content) => {
+        if (!err && content) {
+          const ext = path.extname(tryPaths[idx]).toLowerCase();
+          const contentType = MIME_TYPES[ext] || 'text/html; charset=utf-8';
+          res.setHeader('Content-Type', contentType);
+          res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+          res.setHeader('Pragma', 'no-cache');
+          res.setHeader('Expires', '0');
+          res.statusCode = 200;
+          res.end(content);
+          return resolve();
+        }
+        tryNext(idx + 1);
+      });
+    }
 
-      res.setHeader('Content-Type', contentType);
-      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-      res.setHeader('Pragma', 'no-cache');
-      res.setHeader('Expires', '0');
-      res.statusCode = 200;
-      res.end(content);
-    });
+    tryNext(0);
   });
 }
 
