@@ -63,6 +63,9 @@ document.addEventListener('DOMContentLoaded', () => {
 // --- INICIALIZÁCIA ---
 async function initApp() {
   setupEventListeners();
+  // 1. Záchrana dát na začiatku: ak sa server uspal/reštartoval na Renderi a má 0 absencií, ihneď obnovíme dáta zo zariadenia
+  await checkAndRestoreOnStartup();
+  // 2. Až potom načítame zamestnancov a stav
   await loadEmployees();
   checkSavedAuth();
   updatePwaButton();
@@ -1727,12 +1730,56 @@ async function checkLiveSync() {
   }
 }
 
+async function checkAndRestoreOnStartup() {
+  try {
+    const res = await fetch('/api/sync/status', { cache: 'no-store' });
+    if (!res.ok) return;
+    const status = await res.json();
+    
+    // Ak server po 15-minútovom uspaní/reštarte nemá žiadne absencie
+    if (status.absencesCount === 0) {
+      const backupStr = localStorage.getItem('sp_asistent_cloud_backup');
+      if (backupStr) {
+        const backup = JSON.parse(backupStr);
+        if ((backup.absences && backup.absences.length > 0) || (backup.employees && backup.employees.length > 4)) {
+          console.warn('⚠️ Server po reštarte nemá absencie. Okamžite obnovujem dáta zo zálohy v zariadení...');
+          const restoreRes = await fetch('/api/backup/restore', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(backup)
+          });
+          if (restoreRes.ok) {
+            console.log('✅ Úspešne obnovené dáta zo zálohy pri štarte.');
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('Chyba pri checkAndRestoreOnStartup:', err);
+  }
+}
+
 function saveLocalEmergencyBackup() {
-  if (state.employees && state.employees.length > 0) {
+  let existing = null;
+  try {
+    const s = localStorage.getItem('sp_asistent_cloud_backup');
+    if (s) existing = JSON.parse(s);
+  } catch (e) {}
+
+  const employeesToSave = (state.employees && state.employees.length > 0)
+    ? state.employees
+    : (existing && existing.employees ? existing.employees : []);
+
+  // NIKDY neprepíšeme uložené absencie prázdnym poľom!
+  const absencesToSave = (state.absences && state.absences.length > 0)
+    ? state.absences
+    : (existing && existing.absences ? existing.absences : []);
+
+  if (employeesToSave.length > 0 || absencesToSave.length > 0) {
     const backup = {
       timestamp: Date.now(),
-      employees: state.employees,
-      absences: state.absences || []
+      employees: employeesToSave,
+      absences: absencesToSave
     };
     try {
       localStorage.setItem('sp_asistent_cloud_backup', JSON.stringify(backup));
@@ -1747,7 +1794,7 @@ async function tryAutoRestoreIfServerEmpty() {
   if (!backupStr) return;
   try {
     const backup = JSON.parse(backupStr);
-    if (backup.absences && backup.absences.length > 0) {
+    if ((backup.absences && backup.absences.length > 0) || (backup.employees && backup.employees.length > 4)) {
       console.warn('⚠️ Server po reštarte nemá absencie, obnovujem dáta zo zálohy v prehliadači...');
       const res = await fetch('/api/backup/restore', {
         method: 'POST',

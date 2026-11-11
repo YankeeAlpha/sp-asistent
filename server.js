@@ -70,21 +70,40 @@ const db = {
   }
 };
 
+let initDbPromise = null;
+function getDbInit() {
+  if (!initDbPromise) {
+    initDbPromise = initDatabase();
+  }
+  return initDbPromise;
+}
+
 async function initDatabase() {
-  if (process.env.DATABASE_URL) {
+  const dbUrl = process.env.DATABASE_URL || process.env.POSTGRES_URL || process.env.POSTGRES_PRISMA_URL;
+  if (dbUrl) {
     try {
       const { Pool } = require('pg');
-      const isLocal = process.env.DATABASE_URL.includes('localhost') || process.env.DATABASE_URL.includes('127.0.0.1');
-      pgPool = new Pool({
-        connectionString: process.env.DATABASE_URL,
-        ssl: isLocal ? false : { rejectUnauthorized: false }
-      });
-      // Otestovanie spojenia
-      await pgPool.query('SELECT 1');
-      dbType = 'postgres';
-      console.log('✅ Pripojené k trvalej cloudovej PostgreSQL databáze cez DATABASE_URL.');
+      // 1. Pokus s SSL (Neon.tech, Vercel Postgres, Supabase, Cloud Postgres)
+      try {
+        pgPool = new Pool({
+          connectionString: dbUrl,
+          ssl: { rejectUnauthorized: false }
+        });
+        await pgPool.query('SELECT 1');
+        dbType = 'postgres';
+        console.log('✅ Pripojené k PostgreSQL databáze cez DATABASE_URL / POSTGRES_URL (SSL).');
+      } catch (sslErr) {
+        // 2. Pokus bez SSL (lokálny Postgres / interná sieť)
+        pgPool = new Pool({
+          connectionString: dbUrl,
+          ssl: false
+        });
+        await pgPool.query('SELECT 1');
+        dbType = 'postgres';
+        console.log('✅ Pripojené k PostgreSQL databáze (bez SSL).');
+      }
     } catch (err) {
-      console.error('⚠️ Chyba pripojenia k DATABASE_URL, prepínam na SQLite:', err.message);
+      console.error('⚠️ Chyba pripojenia k PostgreSQL databáze, prepínam na SQLite:', err.message);
       dbType = 'sqlite';
     }
   }
@@ -93,7 +112,7 @@ async function initDatabase() {
     try {
       const { DatabaseSync } = require('node:sqlite');
       sqliteDb = new DatabaseSync(DB_FILE);
-      console.log(`✅ Používa sa lokálna SQLite databáza (${DB_FILE}).`);
+      console.log(`✅ Používa sa SQLite databáza (${DB_FILE}).`);
     } catch (err) {
       console.error('Kritická chyba pri štarte SQLite databázy:', err);
       throw err;
@@ -189,7 +208,6 @@ async function initDatabase() {
   }
 }
 
-// Pomocník pre zvýšenie verzie dát pri akejkoľvek zmene
 function notifyDataChanged() {
   dataVersion = Date.now();
 }
@@ -260,7 +278,7 @@ function calculateWorkingDays(startDateStr, endDateStr, isHalfDay, hours) {
   let count = 0;
   const curr = new Date(start);
   while (curr <= end) {
-    const dayOfWeek = curr.getUTCDay(); // 0 = Nedeľa, 6 = Sobota
+    const dayOfWeek = curr.getUTCDay();
     const dateStr = curr.toISOString().split('T')[0];
     if (dayOfWeek !== 0 && dayOfWeek !== 6 && !holidaysMap.has(dateStr)) {
       count++;
@@ -270,7 +288,6 @@ function calculateWorkingDays(startDateStr, endDateStr, isHalfDay, hours) {
   return count;
 }
 
-// MIME typy
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
@@ -283,12 +300,16 @@ const MIME_TYPES = {
 };
 
 function parseJsonBody(req) {
+  if (req.body) {
+    if (typeof req.body === 'object') return Promise.resolve(req.body);
+    try { return Promise.resolve(JSON.parse(req.body)); } catch (e) {}
+  }
   return new Promise((resolve, reject) => {
     let body = '';
     req.on('data', chunk => {
       body += chunk.toString();
-      if (body.length > 1e7) { // 10MB limit pre obnovu záloh
-        req.socket.destroy();
+      if (body.length > 1e7) {
+        if (req.socket) req.socket.destroy();
         reject(new Error('Payload príliš veľký'));
       }
     });
@@ -312,37 +333,43 @@ async function isAdminRequest(req, parsedUrl) {
 }
 
 function sendJson(res, statusCode, data) {
-  res.writeHead(statusCode, {
-    'Content-Type': 'application/json; charset=utf-8',
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-admin-pin',
-    'Cache-Control': 'no-cache, no-store, must-revalidate',
-    'Pragma': 'no-cache',
-    'Expires': '0'
-  });
-  res.end(JSON.stringify(data));
+  const jsonStr = JSON.stringify(data);
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-admin-pin');
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+
+  if (res.status && typeof res.status === 'function') {
+    res.status(statusCode);
+  } else {
+    res.statusCode = statusCode;
+  }
+  res.end(jsonStr);
 }
 
-// --- HTTP SERVER ---
-const server = http.createServer(async (req, res) => {
+// --- HLAVNÝ REQUEST HANDLER (pre serverless aj lokálny server) ---
+async function handleRequest(req, res) {
+  await getDbInit();
+
   const parsedUrl = url.parse(req.url, true);
   const pathname = parsedUrl.pathname;
   const method = req.method;
 
   // CORS preflight
   if (method === 'OPTIONS') {
-    res.writeHead(204, {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-admin-pin'
-    });
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-admin-pin');
+    res.statusCode = 204;
     return res.end();
   }
 
   // --- API ROUTY ---
 
-  // 0. Synchronizácia & Živý stav (pre okamžitú aktualizáciu na všetkých zariadeniach)
+  // 0. Synchronizácia & Živý stav
   if (pathname === '/api/sync/status' && method === 'GET') {
     try {
       const absencesRow = await db.get("SELECT COUNT(*) as count FROM absences");
@@ -376,7 +403,7 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  // 0c. Obnova kompletnej zálohy (JSON restore - zachráni dáta aj pri čistom reštarte)
+  // 0c. Obnova kompletnej zálohy (JSON restore)
   if (pathname === '/api/backup/restore' && method === 'POST') {
     try {
       const body = await parseJsonBody(req);
@@ -393,27 +420,30 @@ const server = http.createServer(async (req, res) => {
         const existing = await db.get("SELECT * FROM employees WHERE name = ?", [emp.name]);
         if (existing) {
           empIdMap.set(emp.id, existing.id);
-          // Aktualizácia parametrov ak boli zmenené
           await db.run(
             "UPDATE employees SET role = ?, pin = ?, annual_leave_days = ?, color = ?, is_active = ? WHERE id = ?",
             [emp.role || existing.role, emp.pin || existing.pin, emp.annual_leave_days || existing.annual_leave_days, emp.color || existing.color, emp.is_active !== undefined ? emp.is_active : 1, existing.id]
           );
         } else {
-          const res = await db.run(
+          const result = await db.run(
             "INSERT INTO employees (name, role, pin, annual_leave_days, color, is_active) VALUES (?, ?, ?, ?, ?, ?)",
             [emp.name, emp.role || 'employee', emp.pin || '1234', emp.annual_leave_days || 25, emp.color || '#3b82f6', emp.is_active !== undefined ? emp.is_active : 1]
           );
-          empIdMap.set(emp.id, res.lastInsertRowid);
+          empIdMap.set(emp.id, result.lastInsertRowid);
           restoredEmployees++;
         }
       }
 
       // 2. Obnova absencií
       for (const abs of absences) {
-        const targetEmpId = empIdMap.get(abs.employee_id) || abs.employee_id;
+        let targetEmpId = empIdMap.get(abs.employee_id);
+        if (!targetEmpId && abs.employee_name) {
+          const matchByName = await db.get("SELECT id FROM employees WHERE name = ?", [abs.employee_name]);
+          if (matchByName) targetEmpId = matchByName.id;
+        }
+        if (!targetEmpId) targetEmpId = abs.employee_id;
         if (!targetEmpId || !abs.type || !abs.start_date) continue;
 
-        // Kontrola duplicity
         const exists = await db.get(
           "SELECT id FROM absences WHERE employee_id = ? AND type = ? AND start_date = ? AND end_date = ?",
           [targetEmpId, abs.type, abs.start_date, abs.end_date || abs.start_date]
@@ -441,7 +471,7 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  // 1. Prihlásenie (zamestnanec alebo manažér)
+  // 1. Prihlásenie
   if (pathname === '/api/login' && method === 'POST') {
     try {
       const { employeeId, pin } = await parseJsonBody(req);
@@ -567,7 +597,7 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  // 6. Zoznam absencií (filtre: year, month, employee_id)
+  // 6. Zoznam absencií
   if (pathname === '/api/absences' && method === 'GET') {
     try {
       const year = parsedUrl.query.year;
@@ -603,7 +633,6 @@ const server = http.createServer(async (req, res) => {
       sql += ` ORDER BY a.start_date ASC, a.id ASC`;
       const absences = await db.all(sql, params);
 
-      // Doplníme počet pracovných dní
       const enriched = absences.map(a => ({
         ...a,
         working_days: calculateWorkingDays(a.start_date, a.end_date, a.is_half_day === 1, a.hours)
@@ -647,7 +676,7 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  // 7b. Schválenie absencie administrátorom
+  // 7b. Schválenie absencie
   if (pathname.startsWith('/api/absences/') && pathname.endsWith('/approve') && method === 'POST') {
     try {
       const id = Number(pathname.split('/')[3]);
@@ -659,7 +688,7 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  // 7c. Zamietnutie absencie administrátorom
+  // 7c. Zamietnutie absencie
   if (pathname.startsWith('/api/absences/') && pathname.endsWith('/reject') && method === 'POST') {
     try {
       const id = Number(pathname.split('/')[3]);
@@ -793,7 +822,7 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  // 12. Export do CSV (s diakritikou a UTF-8 BOM pre MS Excel)
+  // 12. Export do CSV
   if (pathname === '/api/export' && method === 'GET') {
     try {
       const year = Number(parsedUrl.query.year) || new Date().getFullYear();
@@ -843,10 +872,10 @@ const server = http.createServer(async (req, res) => {
         ? `absencie_${year}_${String(month).padStart(2, '0')}.csv` 
         : `absencie_${year}.csv`;
 
-      res.writeHead(200, {
-        'Content-Type': 'text/csv; charset=utf-8',
-        'Content-Disposition': `attachment; filename="${filename}"`
-      });
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.statusCode = 200;
       return res.end(csv);
     } catch (e) {
       return sendJson(res, 500, { error: e.message });
@@ -878,12 +907,13 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  // 14. Export všetkých hesiel / PINov do Excel tabuľky (CSV) - LEN PRE ADMINISTRÁTORA
+  // 14. Export všetkých hesiel do CSV
   if (pathname === '/api/export-passwords' && method === 'GET') {
     try {
       const authorized = await isAdminRequest(req, parsedUrl);
       if (!authorized) {
-        res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
+        res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+        res.statusCode = 403;
         return res.end('Prístup zamietnutý. Zoznam hesiel môže stiahnuť iba overený administrátor.');
       }
 
@@ -905,21 +935,21 @@ const server = http.createServer(async (req, res) => {
       const today = new Date().toISOString().split('T')[0];
       const filename = `zoznam_hesiel_zamestnancov_${today}.csv`;
 
-      res.writeHead(200, {
-        'Content-Type': 'text/csv; charset=utf-8',
-        'Content-Disposition': `attachment; filename="${filename}"`
-      });
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.statusCode = 200;
       return res.end(csv);
     } catch (e) {
       return sendJson(res, 500, { error: e.message });
     }
   }
 
-  // --- STATICKÉ SÚBORY (Frontend PWA) ---
+  // --- STATICKÉ SÚBORY (pre lokálny server) ---
   let filePath = path.join(PUBLIC_DIR, pathname === '/' ? 'index.html' : pathname);
   
   if (!filePath.startsWith(PUBLIC_DIR)) {
-    res.writeHead(403);
+    res.statusCode = 403;
     return res.end('Prístup odmietnutý');
   }
 
@@ -933,20 +963,20 @@ const server = http.createServer(async (req, res) => {
 
     fs.readFile(filePath, (readErr, content) => {
       if (readErr) {
-        res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+        res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+        res.statusCode = 404;
         return res.end('Súbor nebol nájdený');
       }
 
-      res.writeHead(200, {
-        'Content-Type': contentType,
-        'Cache-Control': 'no-cache, no-store, must-revalidate',
-        'Pragma': 'no-cache',
-        'Expires': '0'
-      });
+      res.setHeader('Content-Type', contentType);
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+      res.statusCode = 200;
       res.end(content);
     });
   });
-});
+}
 
 function getNetworkIps() {
   const interfaces = os.networkInterfaces();
@@ -961,28 +991,33 @@ function getNetworkIps() {
   return ips;
 }
 
-// Spustenie databázy a servera
-initDatabase().then(() => {
-  server.listen(PORT, '0.0.0.0', () => {
-    const ips = getNetworkIps();
-    console.log('\n' + '='.repeat(60));
-    console.log(`   🚀 SP ASISTENT - BEŽÍ ÚSPEŠNE (DB: ${dbType.toUpperCase()})`);
-    console.log('='.repeat(60));
-    console.log(`\n💻 Lokálna adresa na počítači:`);
-    console.log(`   http://localhost:${PORT}`);
-    
-    if (ips.length > 0) {
-      console.log(`\n📱 Mobilná adresa v sieti Wi-Fi:`);
-      ips.forEach(ip => {
-        console.log(`   👉 http://${ip}:${PORT}`);
-      });
-    }
-    console.log('\n' + '-'.repeat(60));
-    console.log('💡 TIP: Pre trvalé ukladanie v cloude bez resetovania nastavte');
-    console.log('   premennú DATABASE_URL (napr. bezplatný Neon.tech PostgreSQL).');
-    console.log('='.repeat(60) + '\n');
+const server = http.createServer(handleRequest);
+
+// Ak sa spúšťa cez "node server.js" (lokálne alebo na klasickom serveri)
+if (require.main === module) {
+  initDatabase().then(() => {
+    server.listen(PORT, '0.0.0.0', () => {
+      const ips = getNetworkIps();
+      console.log('\n' + '='.repeat(60));
+      console.log(`   🚀 SP ASISTENT - BEŽÍ ÚSPEŠNE (DB: ${dbType.toUpperCase()})`);
+      console.log('='.repeat(60));
+      console.log(`\n💻 Lokálna adresa na počítači:`);
+      console.log(`   http://localhost:${PORT}`);
+      
+      if (ips.length > 0) {
+        console.log(`\n📱 Mobilná adresa v sieti Wi-Fi:`);
+        ips.forEach(ip => {
+          console.log(`   👉 http://${ip}:${PORT}`);
+        });
+      }
+      console.log('\n' + '-'.repeat(60));
+      console.log('💡 TIP: Pre Vercel / serverless hosting je exportovaný handleRequest.');
+      console.log('='.repeat(60) + '\n');
+    });
+  }).catch(err => {
+    console.error('❌ Zlyhalo spustenie aplikácie:', err);
+    process.exit(1);
   });
-}).catch(err => {
-  console.error('❌ Zlyhalo spustenie aplikácie:', err);
-  process.exit(1);
-});
+}
+
+module.exports = { handleRequest, server };
