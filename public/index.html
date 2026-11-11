@@ -20,7 +20,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
   
-  <link rel="stylesheet" href="styles.css?v=4.0">
+  <link rel="stylesheet" href="styles.css?v=4.1">
 </head>
 <body>
   <!-- HLAVIČKA APLIKÁCIE -->
@@ -1012,9 +1012,11 @@
           <!-- ZOOM A ROTÁCIA TLAČIDLÁ -->
           <div class="zoom-btn-group">
             <button type="button" class="btn btn-sm btn-ghost zoom-btn" onclick="zoomImage(-25)" title="Zmenšiť">🔍 -</button>
-            <button type="button" id="zoomLevelBtn" class="btn btn-sm btn-outline zoom-btn" onclick="setZoomMode('fit')" title="Prispôsobiť celej obrazovke">📱 Zmestiť</button>
-            <button type="button" class="btn btn-sm btn-primary zoom-btn" onclick="setZoomMode(100)" title="100% originálna čitateľná veľkosť">🔍 100%</button>
-            <button type="button" class="btn btn-sm btn-ghost zoom-btn" onclick="setZoomMode(150)" title="150% priblíženie na detail">🔎 150%</button>
+            <button type="button" id="zoomWidthBtn" class="btn btn-sm btn-primary zoom-btn" onclick="setZoomMode('width')" title="Roztiahnuť na celú šírku obrazovky">📐 Na šírku</button>
+            <button type="button" id="zoomLevelBtn" class="btn btn-sm btn-ghost zoom-btn" onclick="setZoomMode('fit')" title="Zmestiť celú stranu na obrazovku">📱 Celá strana</button>
+            <button type="button" class="btn btn-sm btn-ghost zoom-btn" onclick="setZoomMode(100)" title="100% originálna veľkosť">100%</button>
+            <button type="button" class="btn btn-sm btn-ghost zoom-btn" onclick="setZoomMode(150)" title="150% priblíženie na detail">150%</button>
+            <button type="button" class="btn btn-sm btn-ghost zoom-btn" onclick="setZoomMode(200)" title="200% extra priblíženie">200%</button>
             <button type="button" class="btn btn-sm btn-ghost zoom-btn" onclick="zoomImage(25)" title="Zväčšiť">🔍 +</button>
           </div>
 
@@ -1039,7 +1041,7 @@
 
       <!-- SPODNÁ POMOCNÁ LIŠTA -->
       <div class="image-viewer-footer">
-        <span>💡 <strong>Tip:</strong> Prstom voľne posúvajte do všetkých strán. Ak je fotka nabok, kliknite na <strong>🔄 Otočiť</strong>. Pre natívne priblíženie dvoma prstami kliknite na <strong>↗️ Samostatne</strong>.</span>
+        <span>💡 <strong>Tip:</strong> Posúvajte kolieskom myši alebo prstom. Dvojklikom priblížite na 150%/200%. Ak je fotka nabok, kliknite <strong>🔄 Otočiť</strong>. Pre otvorenie bez okrajov použite <strong>↗️ Samostatne</strong>.</span>
       </div>
     </div>
   </div>
@@ -1086,6 +1088,6 @@
   </div>
 
   <!-- Knižnice a Hlavný skript s cache-buster verziou -->
-  <script src="app.js?v=4.0"></script>
+  <script src="app.js?v=4.1"></script>
 </body>
 </html>

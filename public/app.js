@@ -2754,7 +2754,7 @@ function renderScheduleSyncStatusBanner() {
   }
 }
 
-// Kvalitné spracovanie fotky s automatickým rešpektovaním EXIF orientácie fotoaparátu
+// Kvalitné spracovanie fotky/screenshotu so zachovaním ostrosti textu a EXIF orientácie
 async function compressScheduleImage(file) {
   let bitmap = null;
   if ('createImageBitmap' in window) {
@@ -2765,8 +2765,22 @@ async function compressScheduleImage(file) {
     }
   }
 
-  const drawAndExport = (imgObj, w, h) => {
-    const maxDim = 2200;
+  const readFileDirect = () => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = ev => resolve(ev.target.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+
+  // Ostré PNG / WebP snímky obrazovky do 2.4 MB zachováme bez JPEG kompresie (ostrý text tabuliek)
+  if ((file.type === 'image/png' || file.type === 'image/webp') && file.size <= 2.4 * 1024 * 1024) {
+    if (!bitmap || (bitmap.width <= 3400 && bitmap.height <= 3400)) {
+      if (bitmap && typeof bitmap.close === 'function') bitmap.close();
+      return await readFileDirect();
+    }
+  }
+
+  const drawWithMaxDim = (imgObj, w, h, maxDim, quality) => {
     let targetW = w;
     let targetH = h;
     if (targetW > maxDim || targetH > maxDim) {
@@ -2787,7 +2801,19 @@ async function compressScheduleImage(file) {
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(imgObj, 0, 0, targetW, targetH);
-    return canvas.toDataURL('image/jpeg', 0.90);
+    return canvas.toDataURL('image/jpeg', quality);
+  };
+
+  const drawAndExport = (imgObj, w, h) => {
+    let out = drawWithMaxDim(imgObj, w, h, 3200, 0.93);
+    // Bezpečnostný limit pre Netlify Functions (max 6 MB JSON payload -> držíme pod ~3.8 MB)
+    if (out.length > 3800000) {
+      out = drawWithMaxDim(imgObj, w, h, 2600, 0.88);
+    }
+    if (out.length > 3800000) {
+      out = drawWithMaxDim(imgObj, w, h, 2200, 0.82);
+    }
+    return out;
   };
 
   if (bitmap) {
@@ -3130,6 +3156,51 @@ function checkEmployeeScheduleAnnouncement() {
 let currentViewerZoomPercent = 100;
 let currentViewerRawDataUrl = '';
 let currentViewerNaturalWidth = 0;
+let currentViewerMode = 'width';
+let viewerInteractionsBound = false;
+
+function bindViewerInteractions() {
+  if (viewerInteractionsBound) return;
+  const scrollArea = document.getElementById('imageViewerScrollContainer');
+  if (!scrollArea) return;
+  viewerInteractionsBound = true;
+
+  let isDown = false;
+  let startX = 0;
+  let startY = 0;
+  let scrollLeftStart = 0;
+  let scrollTopStart = 0;
+
+  scrollArea.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;
+    isDown = true;
+    scrollArea.style.cursor = 'grabbing';
+    startX = e.pageX;
+    startY = e.pageY;
+    scrollLeftStart = scrollArea.scrollLeft;
+    scrollTopStart = scrollArea.scrollTop;
+  });
+
+  window.addEventListener('mouseup', () => {
+    if (!isDown) return;
+    isDown = false;
+    scrollArea.style.cursor = '';
+  });
+
+  scrollArea.addEventListener('mousemove', (e) => {
+    if (!isDown) return;
+    e.preventDefault();
+    scrollArea.scrollLeft = scrollLeftStart - (e.pageX - startX);
+    scrollArea.scrollTop = scrollTopStart - (e.pageY - startY);
+  });
+
+  scrollArea.addEventListener('wheel', (e) => {
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault();
+      zoomImage(e.deltaY < 0 ? 20 : -20);
+    }
+  }, { passive: false });
+}
 
 function openImageViewerById(scheduleId) {
   const item = getStoredSchedules().find(s => Number(s.id) === Number(scheduleId));
@@ -3141,6 +3212,7 @@ function openImageViewerById(scheduleId) {
 }
 
 function openImageViewer(imageUrl, title) {
+  bindViewerInteractions();
   const modal = document.getElementById('imageViewerModal');
   const img = document.getElementById('imageViewerImg');
   const titleEl = document.getElementById('imageViewerTitle');
@@ -3160,16 +3232,18 @@ function openImageViewer(imageUrl, title) {
   if (img) {
     img.onload = () => {
       currentViewerNaturalWidth = img.naturalWidth || 1600;
-      // Na mobiloch otvoríme rovnou čitateľnú šírku (min. 1000px alebo 100%) a posunieme na začiatok (0,0)
-      if (window.innerWidth < 768) {
-        setZoomMode(100);
-      } else {
-        setZoomMode('fit');
-      }
-      if (scrollArea) {
-        scrollArea.scrollLeft = 0;
-        scrollArea.scrollTop = 0;
-      }
+      requestAnimationFrame(() => {
+        // Na PC otvoríme na plnú šírku (hned čitateľné veľké písmo), na mobile na 100% s posuvom
+        if (window.innerWidth < 768) {
+          setZoomMode(100);
+        } else {
+          setZoomMode('width');
+        }
+        if (scrollArea) {
+          scrollArea.scrollLeft = 0;
+          scrollArea.scrollTop = 0;
+        }
+      });
     };
     img.src = imageUrl;
   }
@@ -3181,26 +3255,38 @@ function setZoomMode(mode) {
   const scrollArea = document.getElementById('imageViewerScrollContainer');
   if (!img) return;
 
+  const containerW = scrollArea ? Math.max(260, scrollArea.clientWidth - 36) : Math.max(260, window.innerWidth - 48);
+  const containerH = scrollArea ? Math.max(220, scrollArea.clientHeight - 36) : Math.max(220, window.innerHeight - 140);
+  const baseW = Math.max(currentViewerNaturalWidth || 1400, 1200);
+
   if (mode === 'fit') {
-    const containerW = scrollArea ? Math.max(200, scrollArea.clientWidth - 28) : window.innerWidth - 28;
-    const containerH = scrollArea ? Math.max(200, scrollArea.clientHeight - 28) : window.innerHeight - 140;
+    currentViewerMode = 'fit';
     img.style.width = 'auto';
     img.style.maxWidth = `${containerW}px`;
     img.style.maxHeight = `${containerH}px`;
     img.style.cursor = 'zoom-in';
-    const ratio = Math.min(containerW / (currentViewerNaturalWidth || containerW), 1);
-    currentViewerZoomPercent = Math.max(10, Math.round(ratio * 100));
-    if (subTitle) subTitle.textContent = `Mierka: Celá fotka (${currentViewerZoomPercent}%) • Kliknite „100%“ pre ostrý text`;
+    const ratio = Math.min(containerW / baseW, 1);
+    currentViewerZoomPercent = Math.max(25, Math.round(ratio * 100));
+    if (subTitle) subTitle.textContent = `Mierka: Celá strana (${currentViewerZoomPercent}%) • Kliknite „Na šírku“ alebo „150%“ pre zväčšenie`;
+  } else if (mode === 'width') {
+    currentViewerMode = 'width';
+    const targetWidth = Math.max(containerW, 920);
+    img.style.maxWidth = 'none';
+    img.style.maxHeight = 'none';
+    img.style.width = `${targetWidth}px`;
+    img.style.cursor = 'zoom-in';
+    currentViewerZoomPercent = Math.max(40, Math.round((targetWidth / baseW) * 100));
+    if (subTitle) subTitle.textContent = `Mierka: Na celú šírku (${currentViewerZoomPercent}%) • Skrolujte dole alebo kliknite 150%`;
   } else {
+    currentViewerMode = 'percent';
     const pct = Number(mode);
     currentViewerZoomPercent = pct;
-    const baseW = Math.max(currentViewerNaturalWidth || 1400, 1000);
     const targetWidth = Math.round((baseW * pct) / 100);
     img.style.maxWidth = 'none';
     img.style.maxHeight = 'none';
     img.style.width = `${targetWidth}px`;
-    img.style.cursor = pct >= 150 ? 'zoom-out' : 'zoom-in';
-    if (subTitle) subTitle.textContent = `Mierka: ${pct}% ostrý detail • Prstom môžete posúvať do všetkých strán`;
+    img.style.cursor = pct >= 180 ? 'zoom-out' : 'zoom-in';
+    if (subTitle) subTitle.textContent = `Mierka: ${pct}% detail • Ťahajte myšou alebo prstom do strán`;
   }
 }
 
@@ -3220,7 +3306,7 @@ async function rotateViewerImage() {
         if (window.innerWidth < 768) {
           setZoomMode(100);
         } else {
-          setZoomMode('fit');
+          setZoomMode('width');
         }
         if (scrollArea) {
           scrollArea.scrollLeft = 0;
@@ -3236,18 +3322,20 @@ async function rotateViewerImage() {
 
 function zoomImage(delta) {
   let next = currentViewerZoomPercent + delta;
-  if (next < 30) next = 30;
+  if (next < 35) next = 35;
   if (next > 400) next = 400;
   setZoomMode(next);
 }
 
 function toggleImageZoom() {
-  if (currentViewerZoomPercent < 95) {
-    setZoomMode(100);
+  if (currentViewerMode === 'fit') {
+    setZoomMode('width');
   } else if (currentViewerZoomPercent < 145) {
     setZoomMode(150);
+  } else if (currentViewerZoomPercent < 195) {
+    setZoomMode(200);
   } else {
-    setZoomMode('fit');
+    setZoomMode('width');
   }
 }
 

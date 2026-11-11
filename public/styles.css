@@ -1318,16 +1318,20 @@ body {
 }
 .latest-schedule-hero-img-wrap {
   position: relative;
-  max-height: 480px;
+  max-height: 540px;
   background: #0f172a;
   text-align: center;
   cursor: zoom-in;
-  overflow: hidden;
+  overflow: auto;
+  padding: 8px;
 }
 .latest-schedule-hero-img-wrap img {
-  max-width: 100%;
-  max-height: 480px;
-  object-fit: contain;
+  width: 100%;
+  max-width: 860px;
+  height: auto;
+  display: inline-block;
+  background: #ffffff;
+  border-radius: 6px;
 }
 .latest-schedule-hero-info {
   padding: 18px 20px;
@@ -1338,9 +1342,9 @@ body {
    ======================================================== */
 .image-viewer-modal-card {
   width: 98vw;
-  max-width: 1400px;
-  height: 94vh;
-  max-height: 94vh;
+  max-width: 98vw;
+  height: 96vh;
+  max-height: 96vh;
   padding: 0 !important;
   background: #090d16 !important;
   border: 1px solid #334155 !important;
@@ -1426,9 +1430,10 @@ body {
 
 .image-viewer-img {
   display: inline-block;
-  vertical-align: middle;
+  vertical-align: top;
   margin: 0 auto;
   border-radius: 4px;
+  background: #ffffff;
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.9);
   max-width: none;
   height: auto !important;

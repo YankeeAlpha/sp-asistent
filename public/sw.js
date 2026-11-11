@@ -1,9 +1,9 @@
-const CACHE_NAME = 'sp-asistent-v4.0';
+const CACHE_NAME = 'sp-asistent-v4.1';
 const STATIC_ASSETS = [
   './',
   'index.html',
-  'styles.css?v=4.0',
-  'app.js?v=4.0',
+  'styles.css?v=4.1',
+  'app.js?v=4.1',
   'manifest.json',
   'icons/icon.svg',
   'icons/icon-192.png',
