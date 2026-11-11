@@ -9,13 +9,12 @@ const isServerless = !!(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NA
 const DB_FILE = isServerless ? path.join('/tmp', 'data.db') : path.join(__dirname, 'data.db');
 const PUBLIC_DIR = path.join(__dirname, 'public');
 
-// --- DATABÁZOVÝ ADAPTÉR (POSTGRESQL & SQLITE) ---
+// --- DATABÁZOVÝ ADAPTÉR (POSTGRESQL & SQLITE & MEMORY FALLBACK) ---
 let dbType = 'sqlite';
 let pgPool = null;
 let sqliteDb = null;
 let dataVersion = Date.now();
 
-// Záložná in-memory pamäť ak nie je dostupný Postgres ani SQLite
 let memEmployees = [
   { id: 1, name: 'Správca / Manažér', role: 'admin', pin: '0000', annual_leave_days: 25, color: '#8b5cf6', is_active: 1 },
   { id: 2, name: 'Ján Novák', role: 'employee', pin: '1111', annual_leave_days: 25, color: '#3b82f6', is_active: 1 },
@@ -33,13 +32,26 @@ function toPgSql(sql) {
 
 const db = {
   async query(sql, params = []) {
-    if (dbType === 'postgres') {
+    if (dbType === 'postgres' && pgPool) {
       const pgSql = toPgSql(sql);
       const res = await pgPool.query(pgSql, params);
       return res.rows;
     } else if (dbType === 'sqlite' && sqliteDb) {
       return sqliteDb.prepare(sql).all(...params);
     } else {
+      if (sql.includes('FROM employees')) {
+        return memEmployees.filter(e => e.is_active === 1);
+      }
+      if (sql.includes('FROM absences')) {
+        return memAbsences.map(a => {
+          const emp = memEmployees.find(e => e.id === a.employee_id);
+          return {
+            ...a,
+            employee_name: emp ? emp.name : 'Neznámy',
+            employee_color: emp ? emp.color : '#3b82f6'
+          };
+        });
+      }
       return [];
     }
   },
@@ -49,19 +61,46 @@ const db = {
   },
 
   async get(sql, params = []) {
-    if (dbType === 'postgres') {
+    if (dbType === 'postgres' && pgPool) {
       const pgSql = toPgSql(sql);
       const res = await pgPool.query(pgSql, params);
       return res.rows[0] || null;
     } else if (dbType === 'sqlite' && sqliteDb) {
       return sqliteDb.prepare(sql).get(...params) || null;
     } else {
+      if (sql.includes('COUNT(*) as count FROM absences')) {
+        return { count: memAbsences.length };
+      }
+      if (sql.includes('COUNT(*) as count FROM employees')) {
+        return { count: memEmployees.filter(e => e.is_active === 1).length };
+      }
+      if (sql.includes("role = 'admin' AND pin = ?")) {
+        const pin = String(params[0]);
+        return memEmployees.find(e => e.role === 'admin' && e.pin === pin) || null;
+      }
+      if (sql.includes("id = ? AND pin = ?")) {
+        const id = Number(params[0]);
+        const pin = String(params[1]);
+        return memEmployees.find(e => e.id === id && e.pin === pin && e.is_active === 1) || null;
+      }
+      if (sql.includes("id = ? AND is_active = 1")) {
+        const id = Number(params[0]);
+        return memEmployees.find(e => e.id === id && e.is_active === 1) || null;
+      }
+      if (sql.includes("id = ?")) {
+        const id = Number(params[0]);
+        return memEmployees.find(e => e.id === id) || null;
+      }
+      if (sql.includes("name = ?")) {
+        const name = String(params[0]);
+        return memEmployees.find(e => e.name === name) || null;
+      }
       return null;
     }
   },
 
   async run(sql, params = []) {
-    if (dbType === 'postgres') {
+    if (dbType === 'postgres' && pgPool) {
       let isInsert = /^\s*INSERT\s+INTO/i.test(sql);
       let runSql = sql;
       if (isInsert && !/RETURNING/i.test(runSql)) {
@@ -75,12 +114,69 @@ const db = {
       const res = sqliteDb.prepare(sql).run(...params);
       return { lastInsertRowid: res.lastInsertRowid, changes: res.changes };
     } else {
-      return { lastInsertRowid: Date.now(), changes: 1 };
+      if (sql.includes('INSERT INTO absences')) {
+        const id = nextAbsId++;
+        memAbsences.push({
+          id,
+          employee_id: Number(params[0]),
+          type: params[1],
+          start_date: params[2],
+          end_date: params[3],
+          is_half_day: params[4],
+          hours: params[5],
+          note: params[6],
+          status: params[7]
+        });
+        return { lastInsertRowid: id, changes: 1 };
+      }
+      if (sql.includes('INSERT INTO employees')) {
+        const id = nextEmpId++;
+        memEmployees.push({
+          id,
+          name: params[0],
+          role: params[1],
+          pin: params[2],
+          annual_leave_days: params[3],
+          color: params[4],
+          is_active: 1
+        });
+        return { lastInsertRowid: id, changes: 1 };
+      }
+      if (sql.includes("status = 'approved' WHERE id = ?")) {
+        const id = Number(params[0]);
+        const a = memAbsences.find(x => x.id === id);
+        if (a) a.status = 'approved';
+        return { changes: 1 };
+      }
+      if (sql.includes("status = 'rejected' WHERE id = ?")) {
+        const id = Number(params[0]);
+        const a = memAbsences.find(x => x.id === id);
+        if (a) a.status = 'rejected';
+        return { changes: 1 };
+      }
+      if (sql.includes("DELETE FROM absences WHERE id = ?")) {
+        const id = Number(params[0]);
+        memAbsences = memAbsences.filter(x => x.id !== id);
+        return { changes: 1 };
+      }
+      if (sql.includes("DELETE FROM employees WHERE id = ?")) {
+        const id = Number(params[0]);
+        memEmployees = memEmployees.filter(x => x.id !== id);
+        return { changes: 1 };
+      }
+      if (sql.includes("UPDATE employees SET pin = ? WHERE id = ?")) {
+        const pin = String(params[0]);
+        const id = Number(params[1]);
+        const emp = memEmployees.find(x => x.id === id);
+        if (emp) emp.pin = pin;
+        return { changes: 1 };
+      }
+      return { lastInsertRowid: 1, changes: 1 };
     }
   },
 
   async exec(sql) {
-    if (dbType === 'postgres') {
+    if (dbType === 'postgres' && pgPool) {
       await pgPool.query(sql);
     } else if (dbType === 'sqlite' && sqliteDb) {
       sqliteDb.exec(sql);
@@ -121,108 +217,136 @@ async function initDatabase() {
         console.log('✅ Pripojené k PostgreSQL databáze (bez SSL).');
       }
     } catch (err) {
-      console.error('⚠️ Chyba pripojenia k PostgreSQL databáze, prepínam na SQLite:', err.message);
-      dbType = 'sqlite';
+      console.warn('⚠️ Chyba pripojenia k PostgreSQL databáze, prepínam na pamäťový režim:', err.message);
+      dbType = 'memory';
     }
-  }
-
-  if (dbType === 'sqlite') {
+  } else if (!isServerless) {
     try {
       const { DatabaseSync } = require('node:sqlite');
       sqliteDb = new DatabaseSync(DB_FILE);
-      console.log(`✅ Používa sa SQLite databáza (${DB_FILE}).`);
+      dbType = 'sqlite';
+      console.log(`✅ Používa sa lokálna SQLite databáza (${DB_FILE}).`);
     } catch (err) {
-      console.warn('⚠️ SQLite nie je dostupné na tomto prostredí, beží núdzový režim:', err.message);
+      console.warn('⚠️ SQLite nie je dostupné, prepínam na pamäť:', err.message);
       dbType = 'memory';
     }
-  }
-
-  // Vytvorenie tabuliek
-  if (dbType === 'postgres') {
-    await db.exec(`
-      CREATE TABLE IF NOT EXISTS employees (
-        id SERIAL PRIMARY KEY,
-        name TEXT NOT NULL,
-        role TEXT NOT NULL DEFAULT 'employee',
-        pin TEXT NOT NULL DEFAULT '1234',
-        annual_leave_days INTEGER DEFAULT 25,
-        color TEXT DEFAULT '#3b82f6',
-        is_active INTEGER DEFAULT 1,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-
-      CREATE TABLE IF NOT EXISTS absences (
-        id SERIAL PRIMARY KEY,
-        employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
-        type TEXT NOT NULL,
-        start_date TEXT NOT NULL,
-        end_date TEXT NOT NULL,
-        is_half_day INTEGER DEFAULT 0,
-        hours REAL DEFAULT 0,
-        note TEXT DEFAULT '',
-        status TEXT DEFAULT 'approved',
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-
-      CREATE TABLE IF NOT EXISTS settings (
-        key TEXT PRIMARY KEY,
-        value TEXT
-      );
-    `);
   } else {
-    await db.exec(`
-      CREATE TABLE IF NOT EXISTS employees (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
-        role TEXT NOT NULL DEFAULT 'employee',
-        pin TEXT NOT NULL DEFAULT '1234',
-        annual_leave_days INTEGER DEFAULT 25,
-        color TEXT DEFAULT '#3b82f6',
-        is_active INTEGER DEFAULT 1,
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP
-      );
-
-      CREATE TABLE IF NOT EXISTS absences (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
-        type TEXT NOT NULL,
-        start_date TEXT NOT NULL,
-        end_date TEXT NOT NULL,
-        is_half_day INTEGER DEFAULT 0,
-        hours REAL DEFAULT 0,
-        note TEXT DEFAULT '',
-        status TEXT DEFAULT 'approved',
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP
-      );
-
-      CREATE TABLE IF NOT EXISTS settings (
-        key TEXT PRIMARY KEY,
-        value TEXT
-      );
-    `);
+    // Na Verceli bez nastavenej databázy: beží bezpečne v pamäti bez pádu
+    dbType = 'memory';
+    console.log('ℹ️ Vercel režim bez databázy: beží bezpečne v pamäťovom režime.');
   }
 
-  // Kontrola administrátora a predvolených dát
-  const adminCheck = await db.get("SELECT COUNT(*) as count FROM employees WHERE role = 'admin'");
-  const adminCount = adminCheck ? Number(adminCheck.count) : 0;
-  if (adminCount === 0) {
-    await db.run(
-      "INSERT INTO employees (name, role, pin, annual_leave_days, color) VALUES (?, ?, ?, ?, ?)",
-      ['Správca / Manažér', 'admin', '0000', 25, '#8b5cf6']
-    );
-    await db.run(
-      "INSERT INTO employees (name, role, pin, annual_leave_days, color) VALUES (?, ?, ?, ?, ?)",
-      ['Ján Novák', 'employee', '1111', 25, '#3b82f6']
-    );
-    await db.run(
-      "INSERT INTO employees (name, role, pin, annual_leave_days, color) VALUES (?, ?, ?, ?, ?)",
-      ['Mária Kováčová', 'employee', '2222', 25, '#10b981']
-    );
-    await db.run(
-      "INSERT INTO employees (name, role, pin, annual_leave_days, color) VALUES (?, ?, ?, ?, ?)",
-      ['Peter Horváth', 'employee', '3333', 25, '#f59e0b']
-    );
-    console.log('✅ Inicializovaní predvolení zamestnanci.');
+  // Inicializácia štruktúry tabuliek
+  try {
+    if (dbType === 'postgres') {
+      await db.exec(`
+        CREATE TABLE IF NOT EXISTS employees (
+          id SERIAL PRIMARY KEY,
+          name TEXT NOT NULL,
+          role TEXT NOT NULL DEFAULT 'employee',
+          pin TEXT NOT NULL DEFAULT '1234',
+          annual_leave_days INTEGER DEFAULT 25,
+          color TEXT DEFAULT '#3b82f6',
+          is_active INTEGER DEFAULT 1,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS absences (
+          id SERIAL PRIMARY KEY,
+          employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+          type TEXT NOT NULL,
+          start_date TEXT NOT NULL,
+          end_date TEXT NOT NULL,
+          is_half_day INTEGER DEFAULT 0,
+          hours REAL DEFAULT 0,
+          note TEXT DEFAULT '',
+          status TEXT DEFAULT 'approved',
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS settings (
+          key TEXT PRIMARY KEY,
+          value TEXT
+        );
+      `);
+
+      const adminCheck = await db.get("SELECT COUNT(*) as count FROM employees WHERE role = 'admin'");
+      const adminCount = adminCheck ? Number(adminCheck.count) : 0;
+      if (adminCount === 0) {
+        await db.run(
+          "INSERT INTO employees (name, role, pin, annual_leave_days, color) VALUES (?, ?, ?, ?, ?)",
+          ['Správca / Manažér', 'admin', '0000', 25, '#8b5cf6']
+        );
+        await db.run(
+          "INSERT INTO employees (name, role, pin, annual_leave_days, color) VALUES (?, ?, ?, ?, ?)",
+          ['Ján Novák', 'employee', '1111', 25, '#3b82f6']
+        );
+        await db.run(
+          "INSERT INTO employees (name, role, pin, annual_leave_days, color) VALUES (?, ?, ?, ?, ?)",
+          ['Mária Kováčová', 'employee', '2222', 25, '#10b981']
+        );
+        await db.run(
+          "INSERT INTO employees (name, role, pin, annual_leave_days, color) VALUES (?, ?, ?, ?, ?)",
+          ['Peter Horváth', 'employee', '3333', 25, '#f59e0b']
+        );
+        console.log('✅ Inicializovaní predvolení zamestnanci v PostgreSQL.');
+      }
+    } else if (dbType === 'sqlite' && sqliteDb) {
+      await db.exec(`
+        CREATE TABLE IF NOT EXISTS employees (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL,
+          role TEXT NOT NULL DEFAULT 'employee',
+          pin TEXT NOT NULL DEFAULT '1234',
+          annual_leave_days INTEGER DEFAULT 25,
+          color TEXT DEFAULT '#3b82f6',
+          is_active INTEGER DEFAULT 1,
+          created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS absences (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+          type TEXT NOT NULL,
+          start_date TEXT NOT NULL,
+          end_date TEXT NOT NULL,
+          is_half_day INTEGER DEFAULT 0,
+          hours REAL DEFAULT 0,
+          note TEXT DEFAULT '',
+          status TEXT DEFAULT 'approved',
+          created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS settings (
+          key TEXT PRIMARY KEY,
+          value TEXT
+        );
+      `);
+
+      const adminCheck = await db.get("SELECT COUNT(*) as count FROM employees WHERE role = 'admin'");
+      const adminCount = adminCheck ? Number(adminCheck.count) : 0;
+      if (adminCount === 0) {
+        await db.run(
+          "INSERT INTO employees (name, role, pin, annual_leave_days, color) VALUES (?, ?, ?, ?, ?)",
+          ['Správca / Manažér', 'admin', '0000', 25, '#8b5cf6']
+        );
+        await db.run(
+          "INSERT INTO employees (name, role, pin, annual_leave_days, color) VALUES (?, ?, ?, ?, ?)",
+          ['Ján Novák', 'employee', '1111', 25, '#3b82f6']
+        );
+        await db.run(
+          "INSERT INTO employees (name, role, pin, annual_leave_days, color) VALUES (?, ?, ?, ?, ?)",
+          ['Mária Kováčová', 'employee', '2222', 25, '#10b981']
+        );
+        await db.run(
+          "INSERT INTO employees (name, role, pin, annual_leave_days, color) VALUES (?, ?, ?, ?, ?)",
+          ['Peter Horváth', 'employee', '3333', 25, '#f59e0b']
+        );
+        console.log('✅ Inicializovaní predvolení zamestnanci v SQLite.');
+      }
+    }
+  } catch (err) {
+    console.warn('Upozornenie pri inicializácii tabuliek:', err.message);
   }
 }
 
