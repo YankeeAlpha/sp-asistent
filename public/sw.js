@@ -1,4 +1,4 @@
-const CACHE_NAME = 'sp-asistent-v2.5';
+const CACHE_NAME = 'sp-asistent-v3.0';
 
 self.addEventListener('install', event => {
   self.skipWaiting();

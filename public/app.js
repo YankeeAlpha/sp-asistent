@@ -66,6 +66,7 @@ async function initApp() {
   await loadEmployees();
   checkSavedAuth();
   updatePwaButton();
+  startLiveSync();
 }
 
 function setupEventListeners() {
@@ -289,6 +290,7 @@ async function loadEmployees() {
 
     // Naplnenie dropdownov
     populateEmployeeDropdowns();
+    saveLocalEmergencyBackup();
   } catch (e) {
     console.error('loadEmployees error:', e);
   }
@@ -363,6 +365,7 @@ async function fetchEmployeeAbsences() {
     if (res.ok) {
       state.absences = await res.json();
       renderEmployeeAbsenceList();
+      saveLocalEmergencyBackup();
     }
   } catch (e) {
     console.error('fetchEmployeeAbsences error:', e);
@@ -580,6 +583,7 @@ async function fetchManagerAbsences() {
     const res = await fetch(url);
     if (res.ok) {
       state.absences = await res.json();
+      saveLocalEmergencyBackup();
     }
   } catch (e) {
     console.error('fetchManagerAbsences error:', e);
@@ -1267,6 +1271,8 @@ async function handleAbsenceSubmit(e) {
     if (!res.ok) throw new Error('Chyba pri ukladaní absencie');
 
     closeAbsenceModal();
+    broadcastDataChange();
+    checkLiveSync();
 
     if (state.currentUser.role === 'admin') {
       loadManagerData();
@@ -1285,6 +1291,8 @@ async function approveAbsence(id) {
   try {
     const res = await fetch(`/api/absences/${id}/approve`, { method: 'POST' });
     if (!res.ok) throw new Error('Chyba pri schvaľovaní absencie');
+    broadcastDataChange();
+    checkLiveSync();
     if (state.currentUser && state.currentUser.role === 'admin') {
       loadManagerData();
     } else {
@@ -1300,6 +1308,8 @@ async function rejectAbsence(id) {
   try {
     const res = await fetch(`/api/absences/${id}/reject`, { method: 'POST' });
     if (!res.ok) throw new Error('Chyba pri zamietaní absencie');
+    broadcastDataChange();
+    checkLiveSync();
     if (state.currentUser && state.currentUser.role === 'admin') {
       loadManagerData();
     } else {
@@ -1315,6 +1325,8 @@ async function deleteAbsence(id) {
   try {
     const res = await fetch(`/api/absences/${id}`, { method: 'DELETE' });
     if (res.ok) {
+      broadcastDataChange();
+      checkLiveSync();
       if (state.currentUser.role === 'admin') {
         loadManagerData();
       } else {
@@ -1388,6 +1400,10 @@ async function handleEmployeeSubmit(e) {
     }
 
     closeEmployeeModal();
+    broadcastDataChange();
+    checkLiveSync();
+    broadcastDataChange();
+    checkLiveSync();
     await loadEmployees();
     renderEmployeesTable();
     loadManagerData();
@@ -1431,6 +1447,8 @@ async function deleteEmployee(id, empName) {
       const err = await res.json();
       throw new Error(err.error || 'Chyba pri odoberaní zamestnanca');
     }
+    broadcastDataChange();
+    checkLiveSync();
     await loadEmployees();
     renderEmployeesTable();
     loadManagerData();
@@ -1609,6 +1627,8 @@ async function handleChangePinSubmit(e) {
     successDiv.style.display = 'block';
 
     // Aktualizácia v zozname zamestnancov a lokálnom stave
+    broadcastDataChange();
+    checkLiveSync();
     await loadEmployees();
     renderEmployeesTable();
 
@@ -1632,4 +1652,253 @@ function formatDate(dStr) {
   const parts = dStr.split('-');
   if (parts.length !== 3) return dStr;
   return `${Number(parts[2])}. ${Number(parts[1])}. ${parts[0]}`;
+}
+
+// ========================================================
+// LIVE SYNCHRONIZÁCIA A AUTOMATICKÁ ZÁCHRANA DÁT (CLOUD)
+// ========================================================
+let lastKnownDataVersion = null;
+let isSyncing = false;
+let syncIntervalId = null;
+
+// Medzikartová synchronizácia (BroadcastChannel) pre 0ms okamžitý update
+const syncChannel = ('BroadcastChannel' in window) ? new BroadcastChannel('sp_asistent_sync') : null;
+if (syncChannel) {
+  syncChannel.onmessage = (event) => {
+    if (event.data === 'data_changed') {
+      refreshAllDataSilently();
+    }
+  };
+}
+
+function broadcastDataChange() {
+  if (syncChannel) {
+    try {
+      syncChannel.postMessage('data_changed');
+    } catch (e) {}
+  }
+}
+
+function startLiveSync() {
+  if (syncIntervalId) clearInterval(syncIntervalId);
+  // Pravidelná kontrola každé 3.5 sekundy pre okamžité zobrazenie zmien od kolegov
+  syncIntervalId = setInterval(checkLiveSync, 3500);
+
+  // Okamžitá kontrola pri návrate do aplikácie / prepnutí okna
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      checkLiveSync();
+    }
+  });
+  window.addEventListener('focus', checkLiveSync);
+}
+
+async function checkLiveSync() {
+  if (isSyncing) return;
+  isSyncing = true;
+  try {
+    const res = await fetch('/api/sync/status', { cache: 'no-store' });
+    if (!res.ok) {
+      updateSyncBadge(false);
+      return;
+    }
+    const data = await res.json();
+    updateSyncBadge(true, data.dbType);
+
+    // Automatická záchrana/obnova dát pri čistom reštarte Renderu
+    if (data.absencesCount === 0) {
+      await tryAutoRestoreIfServerEmpty();
+    }
+
+    if (lastKnownDataVersion === null) {
+      lastKnownDataVersion = data.version;
+      return;
+    }
+
+    if (data.version !== lastKnownDataVersion) {
+      lastKnownDataVersion = data.version;
+      console.log('🔄 Live sync: zistená nová zmena v databáze, aktualizujem...');
+      await refreshAllDataSilently();
+    }
+  } catch (err) {
+    updateSyncBadge(false);
+  } finally {
+    isSyncing = false;
+  }
+}
+
+function saveLocalEmergencyBackup() {
+  if (state.employees && state.employees.length > 0) {
+    const backup = {
+      timestamp: Date.now(),
+      employees: state.employees,
+      absences: state.absences || []
+    };
+    try {
+      localStorage.setItem('sp_asistent_cloud_backup', JSON.stringify(backup));
+    } catch (e) {
+      console.warn('LocalStorage limit', e);
+    }
+  }
+}
+
+async function tryAutoRestoreIfServerEmpty() {
+  const backupStr = localStorage.getItem('sp_asistent_cloud_backup');
+  if (!backupStr) return;
+  try {
+    const backup = JSON.parse(backupStr);
+    if (backup.absences && backup.absences.length > 0) {
+      console.warn('⚠️ Server po reštarte nemá absencie, obnovujem dáta zo zálohy v prehliadači...');
+      const res = await fetch('/api/backup/restore', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(backup)
+      });
+      if (res.ok) {
+        showToast('♻️ Dáta boli automaticky bezpečne obnovené zo zálohy.', 'success');
+        await refreshAllDataSilently();
+      }
+    }
+  } catch (e) {
+    console.error('Chyba pri auto-restore:', e);
+  }
+}
+
+async function refreshAllDataSilently() {
+  await loadEmployees();
+  if (state.currentUser) {
+    if (state.currentUser.role === 'admin') {
+      await fetchManagerAbsences();
+      await loadManagerStats();
+      renderActiveManagerTab();
+    } else {
+      await fetchEmployeeAbsences();
+      updateEmployeeStats();
+      renderEmployeeCalendar();
+      renderEmpMatrixView();
+    }
+  }
+  saveLocalEmergencyBackup();
+}
+
+function updateSyncBadge(isLive, dbType = 'sqlite') {
+  const badge = document.getElementById('syncStatusBadge');
+  const dot = document.getElementById('syncStatusDot');
+  const text = document.getElementById('syncStatusText');
+  if (!badge || !dot || !text) return;
+
+  if (isLive) {
+    dot.className = 'sync-dot live';
+    text.textContent = dbType === 'postgres' ? 'Cloud: Trvalý' : 'Live: Ihneď';
+    badge.title = dbType === 'postgres'
+      ? 'Pripojené k trvalej cloudovej PostgreSQL databáze. Zmeny sa ihneď ukladajú a nikdy nezmiznú.'
+      : 'Live synchronizácia je aktívna (dáta sa aktualizujú ihneď). Pre 100% trvalé uloženie v cloude odporúčame pripojiť DATABASE_URL.';
+  } else {
+    dot.className = 'sync-dot offline';
+    text.textContent = 'Pripája sa...';
+    badge.title = 'Prebieha pokus o spojenie so serverom...';
+  }
+}
+
+async function manualRefreshSync() {
+  const btn = document.getElementById('refreshSyncBtn');
+  if (btn) btn.classList.add('rotating');
+  try {
+    await refreshAllDataSilently();
+    showToast('🔄 Dáta boli okamžite zosynchronizované.', 'success');
+  } catch (e) {
+    showToast('Chyba pri synchronizácii dát', 'error');
+  } finally {
+    if (btn) setTimeout(() => btn.classList.remove('rotating'), 600);
+  }
+}
+
+function showToast(message, type = 'info') {
+  let container = document.getElementById('toastContainer');
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'toastContainer';
+    container.className = 'toast-container';
+    document.body.appendChild(container);
+  }
+  const item = document.createElement('div');
+  item.className = `toast-item toast-${type}`;
+  item.innerHTML = message;
+  container.appendChild(item);
+
+  setTimeout(() => item.classList.add('toast-show'), 10);
+  setTimeout(() => {
+    item.classList.remove('toast-show');
+    setTimeout(() => item.remove(), 400);
+  }, 3500);
+}
+
+// --- MODAL ZÁLOHY A OBNOVY ---
+function openBackupModal() {
+  const modal = document.getElementById('backupModal');
+  if (modal) modal.style.display = 'flex';
+}
+
+function closeBackupModal() {
+  const modal = document.getElementById('backupModal');
+  if (modal) modal.style.display = 'none';
+}
+
+async function exportFullBackupJson() {
+  try {
+    const res = await fetch('/api/backup/export');
+    if (!res.ok) throw new Error('Chyba pri exporte zálohy');
+    const data = await res.json();
+    const jsonStr = JSON.stringify(data, null, 2);
+    const blob = new Blob([jsonStr], { type: 'application/json' });
+    const dlUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const today = new Date().toISOString().split('T')[0];
+    a.href = dlUrl;
+    a.download = `sp_asistent_zaloha_${today}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(dlUrl);
+    showToast('💾 Záloha bola úspešne stiahnutá.', 'success');
+  } catch (err) {
+    alert(err.message);
+  }
+}
+
+async function importBackupJson(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = async (e) => {
+    try {
+      const parsed = JSON.parse(e.target.result);
+      if (!parsed.employees && !parsed.absences) {
+        throw new Error('Vybraný súbor neobsahuje platné dáta zálohy SP Asistenta.');
+      }
+      const countEmp = parsed.employees ? parsed.employees.length : 0;
+      const countAbs = parsed.absences ? parsed.absences.length : 0;
+      if (!confirm(`Chcete obnoviť dáta zo zálohy?\n\n• Zamestnanci: ${countEmp}\n• Absencie: ${countAbs}\n\nDáta sa bezpečne zlúčia na serveri.`)) {
+        return;
+      }
+
+      const res = await fetch('/api/backup/restore', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(parsed)
+      });
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.error || 'Chyba pri obnove dát');
+
+      showToast(`✅ Obnova úspešná: ${result.restoredEmployees} zamestnancov, ${result.restoredAbsences} absencií.`, 'success');
+      broadcastDataChange();
+      await refreshAllDataSilently();
+      closeBackupModal();
+    } catch (err) {
+      alert('Chyba: ' + err.message);
+    } finally {
+      event.target.value = '';
+    }
+  };
+  reader.readAsText(file);
 }

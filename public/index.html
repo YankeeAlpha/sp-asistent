@@ -20,7 +20,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
   
-  <link rel="stylesheet" href="/styles.css?v=2.5">
+  <link rel="stylesheet" href="/styles.css?v=3.0">
 </head>
 <body>
   <!-- HLAVIČKA APLIKÁCIE -->
@@ -41,6 +41,13 @@
     </div>
 
     <div class="header-right">
+      <div id="syncStatusBadge" class="sync-badge" title="Stav synchronizácie dát">
+        <span id="syncStatusDot" class="sync-dot live"></span>
+        <span id="syncStatusText" class="sync-text">Live: Okamžite</span>
+      </div>
+      <button id="refreshSyncBtn" class="btn btn-sm btn-ghost" title="Okamžite zosynchronizovať najnovšie zmeny z databázy" onclick="manualRefreshSync()">
+        🔄 Obnoviť
+      </button>
       <button id="pwaInstallBtn" class="btn btn-sm btn-outline btn-install" style="display: none;">
         📲 Inštalovať do mobilu
       </button>
@@ -463,6 +470,9 @@
               <button class="btn btn-outline btn-sm" onclick="exportPasswordsCsv()" title="Stiahnuť zoznam všetkých zamestnancov s ich heslami">
                 📥 Stiahnuť heslá do Excelu (CSV)
               </button>
+              <button class="btn btn-outline btn-sm" onclick="openBackupModal()" title="Zálohovanie a trvalá obnova dát systému">
+                💾 Záloha & Obnova dát
+              </button>
               <button class="btn btn-outline btn-sm" onclick="openChangePinModal()" title="Zmeniť heslo správcu">
                 🔑 Zmeniť heslo správcu
               </button>
@@ -735,7 +745,52 @@
     </div>
   </div>
 
+  <!-- MODAL: ZÁLOHA A OBNOVA DÁT -->
+  <div id="backupModal" class="modal-backdrop" style="display: none;">
+    <div class="modal-card" style="max-width: 520px;">
+      <div class="modal-header">
+        <h3>💾 Záloha a Obnova dát systému</h3>
+        <button class="modal-close-btn" onclick="closeBackupModal()">✕</button>
+      </div>
+      <div class="modal-body" style="padding: 16px;">
+        <p class="text-muted" style="margin-bottom: 16px; font-size: 13px;">
+          Tu môžete bezpečne stiahnuť kompletnú databázu (všetci zamestnanci, heslá, absencie a schválenia) alebo obnoviť dáta zo zálohy.
+        </p>
+
+        <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px; margin-bottom: 14px;">
+          <h4 style="margin: 0 0 6px 0; font-size: 14px; color: #1e293b;">📥 1. Stiahnuť zálohu do PC / Mobilu</h4>
+          <p style="font-size: 12px; color: #64748b; margin-bottom: 10px;">
+            Vytvorí kompletný záložný JSON súbor so všetkými dátami.
+          </p>
+          <button class="btn btn-outline btn-sm" onclick="exportFullBackupJson()">
+            💾 Stiahnuť zálohu (.json)
+          </button>
+        </div>
+
+        <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px; margin-bottom: 14px;">
+          <h4 style="margin: 0 0 6px 0; font-size: 14px; color: #1e293b;">📤 2. Obnoviť dáta zo zálohy</h4>
+          <p style="font-size: 12px; color: #64748b; margin-bottom: 10px;">
+            Nahrajte predtým stiahnutý súbor zálohy. Dáta sa ihneď bezpečne obnovia na serveri.
+          </p>
+          <input type="file" id="backupFileInput" accept=".json" style="display: none;" onchange="importBackupJson(event)">
+          <button class="btn btn-primary btn-sm" onclick="document.getElementById('backupFileInput').click()">
+            📂 Vybrať súbor a obnoviť dáta
+          </button>
+        </div>
+
+        <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 12px; font-size: 12px; line-height: 1.5; color: #1e40af;">
+          <strong>💡 Ako zabezpečiť 100% trvalé ukladanie na Render.com:</strong><br>
+          Bezplatný server Render má dočasný disk, ktorý sa pri reštarte vymaže. 
+          Váš prehliadač drží automatickú zálohu, no pre trvalé cloudové úložisko bez akejkoľvek straty dát pripojte bezplatnú PostgreSQL databázu (napr. z <strong>Neon.tech</strong>) zadaním premennej <code>DATABASE_URL</code> v nastaveniach Environment na Renderi.
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-ghost" onclick="closeBackupModal()">Zavrieť</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Knižnice a Hlavný skript s cache-buster verziou -->
-  <script src="/app.js?v=2.5"></script>
+  <script src="/app.js?v=3.0"></script>
 </body>
 </html>

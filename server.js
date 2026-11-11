@@ -3,66 +3,199 @@ const fs = require('node:fs');
 const path = require('node:path');
 const url = require('node:url');
 const os = require('node:os');
-const { DatabaseSync } = require('node:sqlite');
 
 const PORT = process.env.PORT || 3000;
 const DB_FILE = path.join(__dirname, 'data.db');
 const PUBLIC_DIR = path.join(__dirname, 'public');
 
-// --- DATABÁZA ---
-const db = new DatabaseSync(DB_FILE);
+// --- DATABÁZOVÝ ADAPTÉR (POSTGRESQL & SQLITE) ---
+let dbType = 'sqlite';
+let pgPool = null;
+let sqliteDb = null;
+let dataVersion = Date.now();
 
-// Vytvorenie tabuliek
-db.exec(`
-  CREATE TABLE IF NOT EXISTS employees (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    role TEXT NOT NULL DEFAULT 'employee',
-    pin TEXT NOT NULL DEFAULT '1234',
-    annual_leave_days INTEGER DEFAULT 25,
-    color TEXT DEFAULT '#3b82f6',
-    is_active INTEGER DEFAULT 1,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP
-  );
+function toPgSql(sql) {
+  let index = 1;
+  return sql.replace(/\?/g, () => `$${index++}`);
+}
 
-  CREATE TABLE IF NOT EXISTS absences (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
-    type TEXT NOT NULL,
-    start_date TEXT NOT NULL,
-    end_date TEXT NOT NULL,
-    is_half_day INTEGER DEFAULT 0,
-    hours REAL DEFAULT 0,
-    note TEXT DEFAULT '',
-    status TEXT DEFAULT 'approved',
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP
-  );
+const db = {
+  async query(sql, params = []) {
+    if (dbType === 'postgres') {
+      const pgSql = toPgSql(sql);
+      const res = await pgPool.query(pgSql, params);
+      return res.rows;
+    } else {
+      return sqliteDb.prepare(sql).all(...params);
+    }
+  },
 
-  CREATE TABLE IF NOT EXISTS settings (
-    key TEXT PRIMARY KEY,
-    value TEXT
-  );
-`);
+  async all(sql, params = []) {
+    return this.query(sql, params);
+  },
 
-// Predvolené nastavenia a administrátor
-const adminCheck = db.prepare("SELECT COUNT(*) as count FROM employees WHERE role = 'admin'").get();
-if (adminCheck.count === 0) {
-  const insertEmp = db.prepare(`
-    INSERT INTO employees (name, role, pin, annual_leave_days, color) 
-    VALUES (?, ?, ?, ?, ?)
-  `);
-  // Predvolený vedúci / manažér
-  insertEmp.run('Správca / Manažér', 'admin', '0000', 25, '#8b5cf6');
-  // Predvolení ukážkoví zamestnanci
-  insertEmp.run('Ján Novák', 'employee', '1111', 25, '#3b82f6');
-  insertEmp.run('Mária Kováčová', 'employee', '2222', 25, '#10b981');
-  insertEmp.run('Peter Horváth', 'employee', '3333', 25, '#f59e0b');
-  console.log('Inicializovaní predvolení zamestnanci.');
+  async get(sql, params = []) {
+    if (dbType === 'postgres') {
+      const pgSql = toPgSql(sql);
+      const res = await pgPool.query(pgSql, params);
+      return res.rows[0] || null;
+    } else {
+      return sqliteDb.prepare(sql).get(...params) || null;
+    }
+  },
+
+  async run(sql, params = []) {
+    if (dbType === 'postgres') {
+      let isInsert = /^\s*INSERT\s+INTO/i.test(sql);
+      let runSql = sql;
+      if (isInsert && !/RETURNING/i.test(runSql)) {
+        runSql += ' RETURNING id';
+      }
+      const pgSql = toPgSql(runSql);
+      const res = await pgPool.query(pgSql, params);
+      const lastId = isInsert && res.rows[0] ? res.rows[0].id : null;
+      return { lastInsertRowid: lastId, rowCount: res.rowCount };
+    } else {
+      const res = sqliteDb.prepare(sql).run(...params);
+      return { lastInsertRowid: res.lastInsertRowid, changes: res.changes };
+    }
+  },
+
+  async exec(sql) {
+    if (dbType === 'postgres') {
+      await pgPool.query(sql);
+    } else {
+      sqliteDb.exec(sql);
+    }
+  }
+};
+
+async function initDatabase() {
+  if (process.env.DATABASE_URL) {
+    try {
+      const { Pool } = require('pg');
+      const isLocal = process.env.DATABASE_URL.includes('localhost') || process.env.DATABASE_URL.includes('127.0.0.1');
+      pgPool = new Pool({
+        connectionString: process.env.DATABASE_URL,
+        ssl: isLocal ? false : { rejectUnauthorized: false }
+      });
+      // Otestovanie spojenia
+      await pgPool.query('SELECT 1');
+      dbType = 'postgres';
+      console.log('✅ Pripojené k trvalej cloudovej PostgreSQL databáze cez DATABASE_URL.');
+    } catch (err) {
+      console.error('⚠️ Chyba pripojenia k DATABASE_URL, prepínam na SQLite:', err.message);
+      dbType = 'sqlite';
+    }
+  }
+
+  if (dbType === 'sqlite') {
+    try {
+      const { DatabaseSync } = require('node:sqlite');
+      sqliteDb = new DatabaseSync(DB_FILE);
+      console.log(`✅ Používa sa lokálna SQLite databáza (${DB_FILE}).`);
+    } catch (err) {
+      console.error('Kritická chyba pri štarte SQLite databázy:', err);
+      throw err;
+    }
+  }
+
+  // Vytvorenie tabuliek
+  if (dbType === 'postgres') {
+    await db.exec(`
+      CREATE TABLE IF NOT EXISTS employees (
+        id SERIAL PRIMARY KEY,
+        name TEXT NOT NULL,
+        role TEXT NOT NULL DEFAULT 'employee',
+        pin TEXT NOT NULL DEFAULT '1234',
+        annual_leave_days INTEGER DEFAULT 25,
+        color TEXT DEFAULT '#3b82f6',
+        is_active INTEGER DEFAULT 1,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS absences (
+        id SERIAL PRIMARY KEY,
+        employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+        type TEXT NOT NULL,
+        start_date TEXT NOT NULL,
+        end_date TEXT NOT NULL,
+        is_half_day INTEGER DEFAULT 0,
+        hours REAL DEFAULT 0,
+        note TEXT DEFAULT '',
+        status TEXT DEFAULT 'approved',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS settings (
+        key TEXT PRIMARY KEY,
+        value TEXT
+      );
+    `);
+  } else {
+    await db.exec(`
+      CREATE TABLE IF NOT EXISTS employees (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        role TEXT NOT NULL DEFAULT 'employee',
+        pin TEXT NOT NULL DEFAULT '1234',
+        annual_leave_days INTEGER DEFAULT 25,
+        color TEXT DEFAULT '#3b82f6',
+        is_active INTEGER DEFAULT 1,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS absences (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+        type TEXT NOT NULL,
+        start_date TEXT NOT NULL,
+        end_date TEXT NOT NULL,
+        is_half_day INTEGER DEFAULT 0,
+        hours REAL DEFAULT 0,
+        note TEXT DEFAULT '',
+        status TEXT DEFAULT 'approved',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS settings (
+        key TEXT PRIMARY KEY,
+        value TEXT
+      );
+    `);
+  }
+
+  // Kontrola administrátora a predvolených dát
+  const adminCheck = await db.get("SELECT COUNT(*) as count FROM employees WHERE role = 'admin'");
+  const adminCount = adminCheck ? Number(adminCheck.count) : 0;
+  if (adminCount === 0) {
+    await db.run(
+      "INSERT INTO employees (name, role, pin, annual_leave_days, color) VALUES (?, ?, ?, ?, ?)",
+      ['Správca / Manažér', 'admin', '0000', 25, '#8b5cf6']
+    );
+    await db.run(
+      "INSERT INTO employees (name, role, pin, annual_leave_days, color) VALUES (?, ?, ?, ?, ?)",
+      ['Ján Novák', 'employee', '1111', 25, '#3b82f6']
+    );
+    await db.run(
+      "INSERT INTO employees (name, role, pin, annual_leave_days, color) VALUES (?, ?, ?, ?, ?)",
+      ['Mária Kováčová', 'employee', '2222', 25, '#10b981']
+    );
+    await db.run(
+      "INSERT INTO employees (name, role, pin, annual_leave_days, color) VALUES (?, ?, ?, ?, ?)",
+      ['Peter Horváth', 'employee', '3333', 25, '#f59e0b']
+    );
+    console.log('✅ Inicializovaní predvolení zamestnanci.');
+  }
+}
+
+// Pomocník pre zvýšenie verzie dát pri akejkoľvek zmene
+function notifyDataChanged() {
+  dataVersion = Date.now();
 }
 
 // --- VÝPOČET SLOVENSKÝCH ŠTÁTNYCH SVIATKOV ---
 function calculateEaster(year) {
-  // Anonymný algoritmus pre gregoriánsky kalendár (Meeus/Jones/Butcher)
   const a = year % 19;
   const b = Math.floor(year / 100);
   const c = year % 100;
@@ -75,7 +208,7 @@ function calculateEaster(year) {
   const k = c % 4;
   const l = (32 + 2 * e + 2 * i - h - k) % 7;
   const m = Math.floor((a + 11 * h + 22 * l) / 451);
-  const month = Math.floor((h + l - 7 * m + 114) / 31); // 3 = Marec, 4 = Apríl
+  const month = Math.floor((h + l - 7 * m + 114) / 31);
   const day = ((h + l - 7 * m + 114) % 31) + 1;
   return new Date(Date.UTC(year, month - 1, day));
 }
@@ -96,28 +229,22 @@ function getSlovakHolidays(year) {
     { date: `${year}-12-26`, name: 'Druhý sviatok vianočný' }
   ];
 
-  // Veľkonočné sviatky
   const easterSunday = calculateEaster(year);
   
-  // Veľký piatok (Veľká noc - 2 dni)
   const goodFriday = new Date(easterSunday);
   goodFriday.setUTCDate(goodFriday.getUTCDate() - 2);
-  const gfStr = goodFriday.toISOString().split('T')[0];
-  holidays.push({ date: gfStr, name: 'Veľký piatok' });
+  holidays.push({ date: goodFriday.toISOString().split('T')[0], name: 'Veľký piatok' });
 
-  // Veľkonočný pondelok (Veľká noc + 1 deň)
   const easterMonday = new Date(easterSunday);
   easterMonday.setUTCDate(easterMonday.getUTCDate() + 1);
-  const emStr = easterMonday.toISOString().split('T')[0];
-  holidays.push({ date: emStr, name: 'Veľkonočný pondelok' });
+  holidays.push({ date: easterMonday.toISOString().split('T')[0], name: 'Veľkonočný pondelok' });
 
   return holidays.sort((a, b) => a.date.localeCompare(b.date));
 }
 
-// Výpočet pracovných dní medzi dátumami
 function calculateWorkingDays(startDateStr, endDateStr, isHalfDay, hours) {
   if (isHalfDay) return 0.5;
-  if (hours && hours > 0) return hours / 8; // Prepočet na ekvivalent dní
+  if (hours && hours > 0) return hours / 8;
 
   const start = new Date(startDateStr + 'T00:00:00Z');
   const end = new Date(endDateStr + 'T00:00:00Z');
@@ -155,15 +282,14 @@ const MIME_TYPES = {
   '.webmanifest': 'application/manifest+json'
 };
 
-// Pomocník pre parsovanie JSON tela
 function parseJsonBody(req) {
   return new Promise((resolve, reject) => {
     let body = '';
     req.on('data', chunk => {
       body += chunk.toString();
-      if (body.length > 1e6) { // 1MB limit
+      if (body.length > 1e7) { // 10MB limit pre obnovu záloh
         req.socket.destroy();
-        reject(new Error('Payload too large'));
+        reject(new Error('Payload príliš veľký'));
       }
     });
     req.on('end', () => {
@@ -178,21 +304,22 @@ function parseJsonBody(req) {
   });
 }
 
-// Pomocník pre overenie práv administrátora
-function isAdminRequest(req, parsedUrl) {
+async function isAdminRequest(req, parsedUrl) {
   const pin = req.headers['x-admin-pin'] || (parsedUrl && parsedUrl.query && parsedUrl.query.admin_pin);
   if (!pin) return false;
-  const admin = db.prepare("SELECT * FROM employees WHERE role = 'admin' AND pin = ?").get(String(pin));
+  const admin = await db.get("SELECT * FROM employees WHERE role = 'admin' AND pin = ?", [String(pin)]);
   return !!admin;
 }
 
-// Odpoveď JSON
 function sendJson(res, statusCode, data) {
   res.writeHead(statusCode, {
     'Content-Type': 'application/json; charset=utf-8',
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization'
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-admin-pin',
+    'Cache-Control': 'no-cache, no-store, must-revalidate',
+    'Pragma': 'no-cache',
+    'Expires': '0'
   });
   res.end(JSON.stringify(data));
 }
@@ -208,12 +335,111 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(204, {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization'
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-admin-pin'
     });
     return res.end();
   }
 
   // --- API ROUTY ---
+
+  // 0. Synchronizácia & Živý stav (pre okamžitú aktualizáciu na všetkých zariadeniach)
+  if (pathname === '/api/sync/status' && method === 'GET') {
+    try {
+      const absencesRow = await db.get("SELECT COUNT(*) as count FROM absences");
+      const empRow = await db.get("SELECT COUNT(*) as count FROM employees WHERE is_active = 1");
+      return sendJson(res, 200, {
+        success: true,
+        version: dataVersion,
+        dbType,
+        absencesCount: absencesRow ? Number(absencesRow.count) : 0,
+        employeesCount: empRow ? Number(empRow.count) : 0,
+        timestamp: Date.now()
+      });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  // 0b. Export kompletnej zálohy (JSON)
+  if (pathname === '/api/backup/export' && method === 'GET') {
+    try {
+      const employees = await db.all("SELECT * FROM employees ORDER BY id ASC");
+      const absences = await db.all("SELECT * FROM absences ORDER BY start_date ASC, id ASC");
+      return sendJson(res, 200, {
+        exportedAt: new Date().toISOString(),
+        version: dataVersion,
+        employees,
+        absences
+      });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  // 0c. Obnova kompletnej zálohy (JSON restore - zachráni dáta aj pri čistom reštarte)
+  if (pathname === '/api/backup/restore' && method === 'POST') {
+    try {
+      const body = await parseJsonBody(req);
+      const employees = body.employees || [];
+      const absences = body.absences || [];
+
+      let restoredEmployees = 0;
+      let restoredAbsences = 0;
+
+      // 1. Obnova zamestnancov
+      const empIdMap = new Map();
+      for (const emp of employees) {
+        if (!emp.name) continue;
+        const existing = await db.get("SELECT * FROM employees WHERE name = ?", [emp.name]);
+        if (existing) {
+          empIdMap.set(emp.id, existing.id);
+          // Aktualizácia parametrov ak boli zmenené
+          await db.run(
+            "UPDATE employees SET role = ?, pin = ?, annual_leave_days = ?, color = ?, is_active = ? WHERE id = ?",
+            [emp.role || existing.role, emp.pin || existing.pin, emp.annual_leave_days || existing.annual_leave_days, emp.color || existing.color, emp.is_active !== undefined ? emp.is_active : 1, existing.id]
+          );
+        } else {
+          const res = await db.run(
+            "INSERT INTO employees (name, role, pin, annual_leave_days, color, is_active) VALUES (?, ?, ?, ?, ?, ?)",
+            [emp.name, emp.role || 'employee', emp.pin || '1234', emp.annual_leave_days || 25, emp.color || '#3b82f6', emp.is_active !== undefined ? emp.is_active : 1]
+          );
+          empIdMap.set(emp.id, res.lastInsertRowid);
+          restoredEmployees++;
+        }
+      }
+
+      // 2. Obnova absencií
+      for (const abs of absences) {
+        const targetEmpId = empIdMap.get(abs.employee_id) || abs.employee_id;
+        if (!targetEmpId || !abs.type || !abs.start_date) continue;
+
+        // Kontrola duplicity
+        const exists = await db.get(
+          "SELECT id FROM absences WHERE employee_id = ? AND type = ? AND start_date = ? AND end_date = ?",
+          [targetEmpId, abs.type, abs.start_date, abs.end_date || abs.start_date]
+        );
+
+        if (!exists) {
+          await db.run(
+            "INSERT INTO absences (employee_id, type, start_date, end_date, is_half_day, hours, note, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            [targetEmpId, abs.type, abs.start_date, abs.end_date || abs.start_date, abs.is_half_day ? 1 : 0, Number(abs.hours) || 0, abs.note || '', abs.status || 'approved']
+          );
+          restoredAbsences++;
+        }
+      }
+
+      notifyDataChanged();
+      return sendJson(res, 200, {
+        success: true,
+        message: 'Dáta boli úspešne obnovené.',
+        restoredEmployees,
+        restoredAbsences,
+        version: dataVersion
+      });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
 
   // 1. Prihlásenie (zamestnanec alebo manažér)
   if (pathname === '/api/login' && method === 'POST') {
@@ -225,17 +451,15 @@ const server = http.createServer(async (req, res) => {
 
       let employee;
       if (employeeId === 'admin' || !employeeId) {
-        // Kontrola manažérskeho PINu
-        employee = db.prepare("SELECT * FROM employees WHERE role = 'admin' AND pin = ?").get(pin);
+        employee = await db.get("SELECT * FROM employees WHERE role = 'admin' AND pin = ?", [String(pin)]);
       } else {
-        employee = db.prepare("SELECT * FROM employees WHERE id = ? AND pin = ? AND is_active = 1").get(Number(employeeId), pin);
+        employee = await db.get("SELECT * FROM employees WHERE id = ? AND pin = ? AND is_active = 1", [Number(employeeId), String(pin)]);
       }
 
       if (!employee) {
         return sendJson(res, 401, { error: 'Nesprávny PIN kód alebo zamestnanec nebol nájdený.' });
       }
 
-      // Vraciame používateľa vrátane PINu pre aktívnu reláciu
       return sendJson(res, 200, {
         success: true,
         user: {
@@ -255,7 +479,7 @@ const server = http.createServer(async (req, res) => {
   // 2. Zoznam zamestnancov
   if (pathname === '/api/employees' && method === 'GET') {
     try {
-      const employees = db.prepare("SELECT id, name, role, pin, annual_leave_days, color, is_active FROM employees WHERE is_active = 1 ORDER BY role DESC, name ASC").all();
+      const employees = await db.all("SELECT id, name, role, pin, annual_leave_days, color, is_active FROM employees WHERE is_active = 1 ORDER BY role DESC, name ASC");
       return sendJson(res, 200, employees);
     } catch (e) {
       return sendJson(res, 500, { error: e.message });
@@ -275,12 +499,12 @@ const server = http.createServer(async (req, res) => {
       const days = Number(data.annual_leave_days) || 25;
       const color = data.color || '#3b82f6';
 
-      const stmt = db.prepare(`
-        INSERT INTO employees (name, role, pin, annual_leave_days, color)
-        VALUES (?, ?, ?, ?, ?)
-      `);
-      const result = stmt.run(data.name.trim(), role, pin, days, color);
+      const result = await db.run(
+        "INSERT INTO employees (name, role, pin, annual_leave_days, color) VALUES (?, ?, ?, ?, ?)",
+        [data.name.trim(), role, pin, days, color]
+      );
       
+      notifyDataChanged();
       return sendJson(res, 201, {
         success: true,
         id: result.lastInsertRowid,
@@ -300,17 +524,23 @@ const server = http.createServer(async (req, res) => {
     try {
       const id = Number(pathname.split('/')[3]);
       const data = await parseJsonBody(req);
+      const current = await db.get("SELECT * FROM employees WHERE id = ?", [id]);
+      if (!current) {
+        return sendJson(res, 404, { error: 'Zamestnanec nebol nájdený.' });
+      }
       
-      const stmt = db.prepare(`
-        UPDATE employees 
-        SET name = COALESCE(?, name),
-            role = COALESCE(?, role),
-            pin = COALESCE(?, pin),
-            annual_leave_days = COALESCE(?, annual_leave_days),
-            color = COALESCE(?, color)
-        WHERE id = ?
-      `);
-      stmt.run(data.name, data.role, data.pin, data.annual_leave_days, data.color, id);
+      const updatedName = data.name !== undefined ? data.name : current.name;
+      const updatedRole = data.role !== undefined ? data.role : current.role;
+      const updatedPin = data.pin !== undefined ? data.pin : current.pin;
+      const updatedDays = data.annual_leave_days !== undefined ? Number(data.annual_leave_days) : current.annual_leave_days;
+      const updatedColor = data.color !== undefined ? data.color : current.color;
+
+      await db.run(
+        "UPDATE employees SET name = ?, role = ?, pin = ?, annual_leave_days = ?, color = ? WHERE id = ?",
+        [updatedName, updatedRole, updatedPin, updatedDays, updatedColor, id]
+      );
+
+      notifyDataChanged();
       return sendJson(res, 200, { success: true });
     } catch (e) {
       return sendJson(res, 500, { error: e.message });
@@ -324,14 +554,13 @@ const server = http.createServer(async (req, res) => {
       const isPermanent = parsedUrl.query.permanent === 'true';
 
       if (isPermanent) {
-        // Trvalé vymazanie zamestnanca a jeho absencií
-        db.prepare("DELETE FROM absences WHERE employee_id = ?").run(id);
-        db.prepare("DELETE FROM employees WHERE id = ?").run(id);
+        await db.run("DELETE FROM absences WHERE employee_id = ?", [id]);
+        await db.run("DELETE FROM employees WHERE id = ?", [id]);
       } else {
-        // Bezpečná deaktivácia (história dochádzky zostane zachovaná)
-        db.prepare("UPDATE employees SET is_active = 0 WHERE id = ?").run(id);
+        await db.run("UPDATE employees SET is_active = 0 WHERE id = ?", [id]);
       }
 
+      notifyDataChanged();
       return sendJson(res, 200, { success: true, permanent: isPermanent });
     } catch (e) {
       return sendJson(res, 500, { error: e.message });
@@ -361,18 +590,18 @@ const server = http.createServer(async (req, res) => {
       if (year && month) {
         const ym = `${year}-${String(month).padStart(2, '0')}`;
         sql += ` AND (
-          (substr(a.start_date, 1, 7) <= ? AND substr(a.end_date, 1, 7) >= ?)
+          (SUBSTR(a.start_date, 1, 7) <= ? AND SUBSTR(a.end_date, 1, 7) >= ?)
         )`;
         params.push(ym, ym);
       } else if (year) {
         sql += ` AND (
-          substr(a.start_date, 1, 4) = ? OR substr(a.end_date, 1, 4) = ?
+          SUBSTR(a.start_date, 1, 4) = ? OR SUBSTR(a.end_date, 1, 4) = ?
         )`;
         params.push(String(year), String(year));
       }
 
       sql += ` ORDER BY a.start_date ASC, a.id ASC`;
-      const absences = db.prepare(sql).all(...params);
+      const absences = await db.all(sql, params);
 
       // Doplníme počet pracovných dní
       const enriched = absences.map(a => ({
@@ -399,16 +628,14 @@ const server = http.createServer(async (req, res) => {
       const finalEndDate = end_date || start_date;
       const isHalf = is_half_day ? 1 : 0;
       const totalHours = Number(hours) || 0;
-
-      // Ak je explicitne poslaný status (napr. approved od manažéra), použijeme ho, inak pending
       const finalStatus = status || 'pending';
 
-      const stmt = db.prepare(`
-        INSERT INTO absences (employee_id, type, start_date, end_date, is_half_day, hours, note, status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      `);
-      const result = stmt.run(Number(employee_id), type, start_date, finalEndDate, isHalf, totalHours, note || '', finalStatus);
+      const result = await db.run(
+        "INSERT INTO absences (employee_id, type, start_date, end_date, is_half_day, hours, note, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        [Number(employee_id), type, start_date, finalEndDate, isHalf, totalHours, note || '', finalStatus]
+      );
 
+      notifyDataChanged();
       return sendJson(res, 201, {
         success: true,
         id: result.lastInsertRowid,
@@ -424,7 +651,8 @@ const server = http.createServer(async (req, res) => {
   if (pathname.startsWith('/api/absences/') && pathname.endsWith('/approve') && method === 'POST') {
     try {
       const id = Number(pathname.split('/')[3]);
-      db.prepare("UPDATE absences SET status = 'approved' WHERE id = ?").run(id);
+      await db.run("UPDATE absences SET status = 'approved' WHERE id = ?", [id]);
+      notifyDataChanged();
       return sendJson(res, 200, { success: true, status: 'approved' });
     } catch (e) {
       return sendJson(res, 500, { error: e.message });
@@ -435,31 +663,38 @@ const server = http.createServer(async (req, res) => {
   if (pathname.startsWith('/api/absences/') && pathname.endsWith('/reject') && method === 'POST') {
     try {
       const id = Number(pathname.split('/')[3]);
-      db.prepare("UPDATE absences SET status = 'rejected' WHERE id = ?").run(id);
+      await db.run("UPDATE absences SET status = 'rejected' WHERE id = ?", [id]);
+      notifyDataChanged();
       return sendJson(res, 200, { success: true, status: 'rejected' });
     } catch (e) {
       return sendJson(res, 500, { error: e.message });
     }
   }
 
-  // 8. Úprava absencie (napr. zmena stavu schválenia, dátumov)
+  // 8. Úprava absencie
   if (pathname.startsWith('/api/absences/') && method === 'PUT') {
     try {
       const id = Number(pathname.split('/')[3]);
       const data = await parseJsonBody(req);
+      const current = await db.get("SELECT * FROM absences WHERE id = ?", [id]);
+      if (!current) {
+        return sendJson(res, 404, { error: 'Absencia nebola nájdená.' });
+      }
 
-      const stmt = db.prepare(`
-        UPDATE absences
-        SET type = COALESCE(?, type),
-            start_date = COALESCE(?, start_date),
-            end_date = COALESCE(?, end_date),
-            is_half_day = COALESCE(?, is_half_day),
-            hours = COALESCE(?, hours),
-            note = COALESCE(?, note),
-            status = COALESCE(?, status)
-        WHERE id = ?
-      `);
-      stmt.run(data.type, data.start_date, data.end_date, data.is_half_day, data.hours, data.note, data.status, id);
+      const updatedType = data.type !== undefined ? data.type : current.type;
+      const updatedStart = data.start_date !== undefined ? data.start_date : current.start_date;
+      const updatedEnd = data.end_date !== undefined ? data.end_date : current.end_date;
+      const updatedHalf = data.is_half_day !== undefined ? (data.is_half_day ? 1 : 0) : current.is_half_day;
+      const updatedHours = data.hours !== undefined ? Number(data.hours) : current.hours;
+      const updatedNote = data.note !== undefined ? data.note : current.note;
+      const updatedStatus = data.status !== undefined ? data.status : current.status;
+
+      await db.run(
+        "UPDATE absences SET type = ?, start_date = ?, end_date = ?, is_half_day = ?, hours = ?, note = ?, status = ? WHERE id = ?",
+        [updatedType, updatedStart, updatedEnd, updatedHalf, updatedHours, updatedNote, updatedStatus, id]
+      );
+
+      notifyDataChanged();
       return sendJson(res, 200, { success: true });
     } catch (e) {
       return sendJson(res, 500, { error: e.message });
@@ -470,7 +705,8 @@ const server = http.createServer(async (req, res) => {
   if (pathname.startsWith('/api/absences/') && method === 'DELETE') {
     try {
       const id = Number(pathname.split('/')[3]);
-      db.prepare("DELETE FROM absences WHERE id = ?").run(id);
+      await db.run("DELETE FROM absences WHERE id = ?", [id]);
+      notifyDataChanged();
       return sendJson(res, 200, { success: true });
     } catch (e) {
       return sendJson(res, 500, { error: e.message });
@@ -483,20 +719,20 @@ const server = http.createServer(async (req, res) => {
     return sendJson(res, 200, getSlovakHolidays(year));
   }
 
-  // 11. Súhrnné štatistiky a zostatky (dovolenka, PN, OČR, lekár, náhradné voľno)
+  // 11. Súhrnné štatistiky a zostatky
   if (pathname === '/api/stats' && method === 'GET') {
     try {
       const year = Number(parsedUrl.query.year) || new Date().getFullYear();
-      const employees = db.prepare("SELECT id, name, role, annual_leave_days, color FROM employees WHERE is_active = 1 ORDER BY name ASC").all();
+      const employees = await db.all("SELECT id, name, role, annual_leave_days, color FROM employees WHERE is_active = 1 ORDER BY name ASC");
 
-      const stats = employees.map(emp => {
-        // Získame všetky absencie pre daného zamestnanca v roku
-        const absences = db.prepare(`
+      const stats = [];
+      for (const emp of employees) {
+        const absences = await db.all(`
           SELECT * FROM absences 
           WHERE employee_id = ? 
-            AND (substr(start_date, 1, 4) = ? OR substr(end_date, 1, 4) = ?)
+            AND (SUBSTR(start_date, 1, 4) = ? OR SUBSTR(end_date, 1, 4) = ?)
             AND status != 'rejected'
-        `).all(emp.id, String(year), String(year));
+        `, [emp.id, String(year), String(year)]);
 
         let usedVacationDays = 0;
         let pnDays = 0;
@@ -533,7 +769,7 @@ const server = http.createServer(async (req, res) => {
 
         const remainingVacation = emp.annual_leave_days - usedVacationDays;
 
-        return {
+        stats.push({
           employee_id: emp.id,
           name: emp.name,
           role: emp.role,
@@ -548,8 +784,8 @@ const server = http.createServer(async (req, res) => {
           compensatory_leave_days: compensatoryLeaveDays,
           other_days: otherDays,
           total_absences_count: absences.length
-        };
-      });
+        });
+      }
 
       return sendJson(res, 200, { year, stats });
     } catch (e) {
@@ -573,15 +809,15 @@ const server = http.createServer(async (req, res) => {
 
       if (month) {
         const ym = `${year}-${String(month).padStart(2, '0')}`;
-        sql += ` AND (substr(a.start_date, 1, 7) <= ? AND substr(a.end_date, 1, 7) >= ?)`;
+        sql += ` AND (SUBSTR(a.start_date, 1, 7) <= ? AND SUBSTR(a.end_date, 1, 7) >= ?)`;
         params.push(ym, ym);
       } else {
-        sql += ` AND (substr(a.start_date, 1, 4) = ? OR substr(a.end_date, 1, 4) = ?)`;
+        sql += ` AND (SUBSTR(a.start_date, 1, 4) = ? OR SUBSTR(a.end_date, 1, 4) = ?)`;
         params.push(String(year), String(year));
       }
 
       sql += ` ORDER BY a.start_date ASC, e.name ASC`;
-      const rows = db.prepare(sql).all(...params);
+      const rows = await db.all(sql, params);
 
       const typeLabels = {
         'dovolenka': 'Dovolenka',
@@ -592,7 +828,7 @@ const server = http.createServer(async (req, res) => {
         'ine': 'Iné'
       };
 
-      let csv = '\uFEFF'; // UTF-8 BOM pre Excel
+      let csv = '\uFEFF';
       csv += 'Zamestnanec;Typ absencie;Od;Do;Počet pracovných dní;Hodiny;Poldňa;Stav;Poznámka\r\n';
 
       rows.forEach(r => {
@@ -625,17 +861,17 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 400, { error: 'Vyplňte nové heslo / PIN.' });
       }
 
-      const emp = db.prepare("SELECT * FROM employees WHERE id = ? AND is_active = 1").get(Number(employeeId));
+      const emp = await db.get("SELECT * FROM employees WHERE id = ? AND is_active = 1", [Number(employeeId)]);
       if (!emp) {
         return sendJson(res, 404, { error: 'Používateľ nebol nájdený.' });
       }
 
-      // Ak je zadané staré heslo a nezhoduje sa, upozorníme
       if (oldPin && oldPin.trim() && emp.pin && emp.pin !== oldPin.trim()) {
         return sendJson(res, 400, { error: 'Pôvodné heslo / PIN nie je správne.' });
       }
 
-      db.prepare("UPDATE employees SET pin = ? WHERE id = ?").run(newPin.trim(), Number(employeeId));
+      await db.run("UPDATE employees SET pin = ? WHERE id = ?", [newPin.trim(), Number(employeeId)]);
+      notifyDataChanged();
       return sendJson(res, 200, { success: true, message: 'Heslo bolo úspešne zmenené.' });
     } catch (e) {
       return sendJson(res, 500, { error: e.message });
@@ -645,19 +881,20 @@ const server = http.createServer(async (req, res) => {
   // 14. Export všetkých hesiel / PINov do Excel tabuľky (CSV) - LEN PRE ADMINISTRÁTORA
   if (pathname === '/api/export-passwords' && method === 'GET') {
     try {
-      if (!isAdminRequest(req, parsedUrl)) {
+      const authorized = await isAdminRequest(req, parsedUrl);
+      if (!authorized) {
         res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
         return res.end('Prístup zamietnutý. Zoznam hesiel môže stiahnuť iba overený administrátor.');
       }
 
-      const rows = db.prepare(`
+      const rows = await db.all(`
         SELECT name, role, pin, annual_leave_days 
         FROM employees 
         WHERE is_active = 1 
         ORDER BY role DESC, name ASC
-      `).all();
+      `);
 
-      let csv = '\uFEFF'; // UTF-8 BOM pre Excel
+      let csv = '\uFEFF';
       csv += 'Meno a priezvisko;Rola v systéme;Prihlasovacie heslo / PIN;Ročný nárok na dovolenku (dní);Stav účtu\r\n';
 
       rows.forEach(r => {
@@ -681,7 +918,6 @@ const server = http.createServer(async (req, res) => {
   // --- STATICKÉ SÚBORY (Frontend PWA) ---
   let filePath = path.join(PUBLIC_DIR, pathname === '/' ? 'index.html' : pathname);
   
-  // Zabezpečenie proti directory traversal
   if (!filePath.startsWith(PUBLIC_DIR)) {
     res.writeHead(403);
     return res.end('Prístup odmietnutý');
@@ -689,7 +925,6 @@ const server = http.createServer(async (req, res) => {
 
   fs.stat(filePath, (err, stats) => {
     if (err || !stats.isFile()) {
-      // Fallback pre SPA na index.html ak súbor neexistuje
       filePath = path.join(PUBLIC_DIR, 'index.html');
     }
 
@@ -713,7 +948,6 @@ const server = http.createServer(async (req, res) => {
   });
 });
 
-// Získanie sieťových IP adries počítača
 function getNetworkIps() {
   const interfaces = os.networkInterfaces();
   const ips = [];
@@ -727,22 +961,28 @@ function getNetworkIps() {
   return ips;
 }
 
-server.listen(PORT, '0.0.0.0', () => {
-  const ips = getNetworkIps();
-  console.log('\n' + '='.repeat(60));
-  console.log('   🚀 SP ASISTENT - EVIDENCIA ABSENCIÍ & KALENDÁR');
-  console.log('='.repeat(60));
-  console.log(`\n💻 Pre vás na tomto počítači:`);
-  console.log(`   http://localhost:${PORT}`);
-  
-  if (ips.length > 0) {
-    console.log(`\n📱 Pre zamestnancov v mobile (rovnaká Wi-Fi / sieť):`);
-    ips.forEach(ip => {
-      console.log(`   👉 http://${ip}:${PORT}`);
-    });
-  }
-  console.log('\n' + '-'.repeat(60));
-  console.log('💡 TIP: Pre inštaláciu do mobilu otvorte odkaz v mobile a zvoľte');
-  console.log('   „Pridať na plochu“ (Add to Home screen)');
-  console.log('='.repeat(60) + '\n');
+// Spustenie databázy a servera
+initDatabase().then(() => {
+  server.listen(PORT, '0.0.0.0', () => {
+    const ips = getNetworkIps();
+    console.log('\n' + '='.repeat(60));
+    console.log(`   🚀 SP ASISTENT - BEŽÍ ÚSPEŠNE (DB: ${dbType.toUpperCase()})`);
+    console.log('='.repeat(60));
+    console.log(`\n💻 Lokálna adresa na počítači:`);
+    console.log(`   http://localhost:${PORT}`);
+    
+    if (ips.length > 0) {
+      console.log(`\n📱 Mobilná adresa v sieti Wi-Fi:`);
+      ips.forEach(ip => {
+        console.log(`   👉 http://${ip}:${PORT}`);
+      });
+    }
+    console.log('\n' + '-'.repeat(60));
+    console.log('💡 TIP: Pre trvalé ukladanie v cloude bez resetovania nastavte');
+    console.log('   premennú DATABASE_URL (napr. bezplatný Neon.tech PostgreSQL).');
+    console.log('='.repeat(60) + '\n');
+  });
+}).catch(err => {
+  console.error('❌ Zlyhalo spustenie aplikácie:', err);
+  process.exit(1);
 });
