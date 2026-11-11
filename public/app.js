@@ -3039,7 +3039,10 @@ function renderManagerSchedules() {
           ${s.note ? `<div class="schedule-photo-note">💬 ${escapeHtml(s.note)}</div>` : ''}
           <div class="schedule-photo-actions">
             <button type="button" class="btn btn-sm btn-primary" onclick="openImageViewerById(${s.id})">
-              🔍 Zväčšiť a čítať
+              🔍 Zväčšiť
+            </button>
+            <button type="button" class="btn btn-sm btn-outline" onclick="openScheduleInNewTab(${s.id})" title="Otvoriť fotku priamo v novom okne">
+              ↗️ Nové okno
             </button>
             <button type="button" class="btn btn-sm btn-danger" onclick="deleteSchedule(${s.id})" title="Zmazať rozpis">
               🗑️ Zmazať
@@ -3090,9 +3093,14 @@ function renderEmployeeSchedules() {
             <h3 style="margin: 0 0 4px 0; font-size: 18px; color: #1e293b;">${escapeHtml(latest.title)}</h3>
             <span style="font-size: 13px; color: var(--text-muted);">Zverejnil: <strong>${escapeHtml(latest.authorName)}</strong> • ${latestDateFormatted}</span>
           </div>
-          <button type="button" class="btn btn-sm btn-primary" onclick="openImageViewerById(${latest.id})">
-            🔍 Otvoriť na celú obrazovku (Čítať)
-          </button>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            <button type="button" class="btn btn-sm btn-primary" onclick="openImageViewerById(${latest.id})">
+              🔍 Otvoriť na celú obrazovku
+            </button>
+            <button type="button" class="btn btn-sm btn-outline" onclick="openScheduleInNewTab(${latest.id})" title="Otvoriť fotku priamo v novom okne prehliadača">
+              ↗️ Otvoriť v novom okne
+            </button>
+          </div>
         </div>
         ${latest.note ? `<div style="background: #f1f5f9; padding: 10px 14px; border-radius: 8px; font-size: 14px; color: #334155; margin-top: 10px;">💬 <strong>Poznámka od správcu:</strong> ${escapeHtml(latest.note)}</div>` : ''}
       </div>
@@ -3115,6 +3123,10 @@ function renderEmployeeSchedules() {
             <div class="schedule-photo-title">${escapeHtml(s.title)}</div>
             <div class="schedule-photo-meta">📅 ${dStr}</div>
             ${s.note ? `<div class="schedule-photo-note" style="font-size:12px;">${escapeHtml(s.note)}</div>` : ''}
+            <div class="schedule-photo-actions">
+              <button type="button" class="btn btn-sm btn-primary" onclick="openImageViewerById(${s.id})">🔍 Zväčšiť</button>
+              <button type="button" class="btn btn-sm btn-outline" onclick="openScheduleInNewTab(${s.id})">↗️ Nové okno</button>
+            </div>
           </div>
         </div>
       `;
@@ -3354,19 +3366,30 @@ function dataUrlToBlobUrl(dataUrl) {
   }
 }
 
-function openImageInNewTab() {
-  if (!currentViewerRawDataUrl) return;
-  const targetUrl = currentViewerRawDataUrl.startsWith('data:')
-    ? dataUrlToBlobUrl(currentViewerRawDataUrl)
-    : currentViewerRawDataUrl;
-
-  const win = window.open(targetUrl, '_blank');
+function openUrlInNewTab(rawUrl) {
+  if (!rawUrl) return;
+  const targetUrl = rawUrl.startsWith('data:') ? dataUrlToBlobUrl(rawUrl) : rawUrl;
+  const win = window.open(targetUrl, '_blank', 'noopener');
   if (!win) {
     const a = document.createElement('a');
     a.href = targetUrl;
     a.target = '_blank';
+    a.rel = 'noopener';
     a.click();
   }
+}
+
+function openScheduleInNewTab(scheduleId) {
+  const item = getStoredSchedules().find(s => Number(s.id) === Number(scheduleId));
+  if (!item || !item.imageUrl) {
+    showToast('Rozpis sa nepodarilo otvoriť.', 'error');
+    return;
+  }
+  openUrlInNewTab(item.imageUrl);
+}
+
+function openImageInNewTab() {
+  openUrlInNewTab(currentViewerRawDataUrl);
 }
 
 function closeImageViewer() {
