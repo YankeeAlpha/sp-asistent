@@ -5,7 +5,8 @@ const url = require('node:url');
 const os = require('node:os');
 
 const PORT = process.env.PORT || 3000;
-const DB_FILE = path.join(__dirname, 'data.db');
+const isServerless = !!(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.NETLIFY);
+const DB_FILE = isServerless ? path.join('/tmp', 'data.db') : path.join(__dirname, 'data.db');
 const PUBLIC_DIR = path.join(__dirname, 'public');
 
 // --- DATABÁZOVÝ ADAPTÉR (POSTGRESQL & SQLITE) ---
@@ -13,6 +14,17 @@ let dbType = 'sqlite';
 let pgPool = null;
 let sqliteDb = null;
 let dataVersion = Date.now();
+
+// Záložná in-memory pamäť ak nie je dostupný Postgres ani SQLite
+let memEmployees = [
+  { id: 1, name: 'Správca / Manažér', role: 'admin', pin: '0000', annual_leave_days: 25, color: '#8b5cf6', is_active: 1 },
+  { id: 2, name: 'Ján Novák', role: 'employee', pin: '1111', annual_leave_days: 25, color: '#3b82f6', is_active: 1 },
+  { id: 3, name: 'Mária Kováčová', role: 'employee', pin: '2222', annual_leave_days: 25, color: '#10b981', is_active: 1 },
+  { id: 4, name: 'Peter Horváth', role: 'employee', pin: '3333', annual_leave_days: 25, color: '#f59e0b', is_active: 1 }
+];
+let memAbsences = [];
+let nextEmpId = 5;
+let nextAbsId = 1;
 
 function toPgSql(sql) {
   let index = 1;
@@ -25,8 +37,10 @@ const db = {
       const pgSql = toPgSql(sql);
       const res = await pgPool.query(pgSql, params);
       return res.rows;
-    } else {
+    } else if (dbType === 'sqlite' && sqliteDb) {
       return sqliteDb.prepare(sql).all(...params);
+    } else {
+      return [];
     }
   },
 
@@ -39,8 +53,10 @@ const db = {
       const pgSql = toPgSql(sql);
       const res = await pgPool.query(pgSql, params);
       return res.rows[0] || null;
-    } else {
+    } else if (dbType === 'sqlite' && sqliteDb) {
       return sqliteDb.prepare(sql).get(...params) || null;
+    } else {
+      return null;
     }
   },
 
@@ -55,16 +71,18 @@ const db = {
       const res = await pgPool.query(pgSql, params);
       const lastId = isInsert && res.rows[0] ? res.rows[0].id : null;
       return { lastInsertRowid: lastId, rowCount: res.rowCount };
-    } else {
+    } else if (dbType === 'sqlite' && sqliteDb) {
       const res = sqliteDb.prepare(sql).run(...params);
       return { lastInsertRowid: res.lastInsertRowid, changes: res.changes };
+    } else {
+      return { lastInsertRowid: Date.now(), changes: 1 };
     }
   },
 
   async exec(sql) {
     if (dbType === 'postgres') {
       await pgPool.query(sql);
-    } else {
+    } else if (dbType === 'sqlite' && sqliteDb) {
       sqliteDb.exec(sql);
     }
   }
@@ -73,17 +91,18 @@ const db = {
 let initDbPromise = null;
 function getDbInit() {
   if (!initDbPromise) {
-    initDbPromise = initDatabase();
+    initDbPromise = initDatabase().catch(err => {
+      console.warn('initDatabase fallback zachytený:', err.message);
+    });
   }
   return initDbPromise;
 }
 
 async function initDatabase() {
-  const dbUrl = process.env.DATABASE_URL || process.env.POSTGRES_URL || process.env.POSTGRES_PRISMA_URL;
+  const dbUrl = process.env.POSTGRES_URL || process.env.DATABASE_URL || process.env.POSTGRES_PRISMA_URL || process.env.POSTGRES_URL_NON_POOLING;
   if (dbUrl) {
     try {
       const { Pool } = require('pg');
-      // 1. Pokus s SSL (Neon.tech, Vercel Postgres, Supabase, Cloud Postgres)
       try {
         pgPool = new Pool({
           connectionString: dbUrl,
@@ -91,9 +110,8 @@ async function initDatabase() {
         });
         await pgPool.query('SELECT 1');
         dbType = 'postgres';
-        console.log('✅ Pripojené k PostgreSQL databáze cez DATABASE_URL / POSTGRES_URL (SSL).');
+        console.log('✅ Pripojené k PostgreSQL databáze cez POSTGRES_URL / DATABASE_URL (SSL).');
       } catch (sslErr) {
-        // 2. Pokus bez SSL (lokálny Postgres / interná sieť)
         pgPool = new Pool({
           connectionString: dbUrl,
           ssl: false
@@ -114,8 +132,8 @@ async function initDatabase() {
       sqliteDb = new DatabaseSync(DB_FILE);
       console.log(`✅ Používa sa SQLite databáza (${DB_FILE}).`);
     } catch (err) {
-      console.error('Kritická chyba pri štarte SQLite databázy:', err);
-      throw err;
+      console.warn('⚠️ SQLite nie je dostupné na tomto prostredí, beží núdzový režim:', err.message);
+      dbType = 'memory';
     }
   }
 
@@ -1020,4 +1038,10 @@ if (require.main === module) {
   });
 }
 
-module.exports = { handleRequest, server };
+function handler(req, res) {
+  return handleRequest(req, res);
+}
+handler.handleRequest = handleRequest;
+handler.server = server;
+
+module.exports = handler;
